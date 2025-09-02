@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WiFi Settings</title>
+<link rel="stylesheet" href="web/style.css">
+<link rel="icon" href="web/esp32_robotic_arm.ico" type="image/x-icon">
+<script>
+function saveWiFi() {
+  const ssid = document.getElementById('ssid').value;
+  const pass = document.getElementById('pass').value;
+  if(!ssid || !pass) { alert("SSID and password must be filled!"); return; }
+
+  fetch('/wifi_config', {
+    method:'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ssid:ssid, password:pass})
+  })
+  .then(r=>r.text())
+  .then(data=>{
+    alert("WiFi settings sent! A restart of the AP will be needed.");
+  })
+  .catch(err=>alert("Error: "+err));
+}
+function resetWiFi() {
+  if (!confirm("Do you really want to reset WiFi settings?")) return;
+
+  fetch('/wifi_reset', { method: 'POST' })
+    .then(r => r.text())
+    .then(data => alert("WiFi settings reset. ESP32 will restart."))
+    .catch(err => alert("Error: " + err));
+}
+
+</script>
+</head>
+<body>
+  <div class="navbar">
+    <h2><a href="/" style="text-decoration: none; color: white;">ESP32 Robotic Arm</a></h2>
+    <div class="status">
+      <div class="status-dot"></div>
+      <span>Connected</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <h1>WiFi Settings</h1>
+    
+    <div class="form-group">
+      <label for="ssid">SSID</label>
+      <input type="text" id="ssid" placeholder="Enter SSID">
+    </div>
+
+    <div class="form-group">
+      <label for="pass">Password</label>
+      <input type="password" id="pass" placeholder="Enter Password">
+    </div>
+    <button onclick="saveWiFi()">Save WiFi</button>
+
+    <button onclick="resetWiFi()">! Reset WiFi !</button>
+  </div>
+
+  <div class="footer">
+    <p>ESP32 RoboticArm Petr Oblouk © 2025</p>
+  </div>
+</body>
+</html>
