@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "https_server",
-    "project_version":    "8cebfae-dirty",
+    "project_version":    "c324611-dirty",
     "project_path":       "C:/Users/petao/Documents/skola/Bakalarka/Program/HTTPS server/simple",
     "idf_path":           "C:/Users/petao/esp/v5.4.1/esp-idf",
     "build_dir":          "C:/Users/petao/Documents/skola/Bakalarka/Program/HTTPS server/simple/build",
