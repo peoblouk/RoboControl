@@ -36,25 +36,13 @@ static esp_err_t servo_post_handler(httpd_req_t *req)
     cJSON *servo_id_json = cJSON_GetObjectItemCaseSensitive(json, "servo_id");
     cJSON *angle_json = cJSON_GetObjectItemCaseSensitive(json, "angle");
 
-    if (cJSON_IsNumber(servo_id_json) && cJSON_IsNumber(angle_json)) {
+    if (cJSON_IsNumber(servo_id_json) && cJSON_IsNumber(angle_json)) { 
         int servo_id = servo_id_json->valueint;
-        int angle = angle_json->valueint;
+        float angle = angle_json->valuedouble;
 
-        if (servo_id >= 0 && servo_id < SERVO_COUNT) {
-            if (angle < 0) angle = 0;
-            if (angle > 180) angle = 180;
+        servo_set_angle(servo_id, angle);
 
-            // Přepočet úhlu na duty cycle
-            uint32_t duty_min = (uint32_t)(0.5 / 20.0 * 16384);  // 0.5ms / 20ms * 16384
-            uint32_t duty_max = (uint32_t)(2.5 / 20.0 * 16384);  // 2.5ms / 20ms * 16384
-            uint32_t duty = duty_min + ((duty_max - duty_min) * angle) / 180;
-
-            // Nastavení PWM pro konkrétní servo
-            ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel, duty);
-            ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel);
-
-            ESP_LOGI(TAG, "Servo %d set to: %d° (duty: %" PRIu32 ")", servo_id, angle, duty);
-        }
+        httpd_resp_sendstr(req, "Servo moved");
     }
 
     cJSON_Delete(json);
@@ -62,8 +50,50 @@ static esp_err_t servo_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// HOT FIX :D
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
+esp_err_t move_xyz_post_handler(httpd_req_t *req) {
+    char buf[256];
+    int ret = httpd_req_recv(req, buf, MIN(req->content_len, sizeof(buf)-1));
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *x_json = cJSON_GetObjectItem(json, "x");
+    cJSON *y_json = cJSON_GetObjectItem(json, "y");
+    cJSON *z_json = cJSON_GetObjectItem(json, "z");
+
+    if (cJSON_IsNumber(x_json) && cJSON_IsNumber(y_json) && cJSON_IsNumber(z_json)) {
+        float x = (float)x_json->valuedouble;
+        float y = (float)y_json->valuedouble;
+        float z = (float)z_json->valuedouble;
+
+        ESP_LOGI("MOVE_XYZ", "Target position: X=%.2f, Y=%.2f, Z=%.2f", x, y, z);
+
+        // TODO: volání inverzní kinematiky -> převede (x,y,z) na úhly q_target[]
+        // float q_target[SERVO_COUNT];
+        // inverse_kinematics(x, y, z, q_target);
+        // move_to_position(q_target);
+
+        httpd_resp_sendstr(req, "Move command accepted");
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing parameters");
+    }
+
+    cJSON_Delete(json);
+    return ESP_OK;
+}
+
 // ===============================
-// SENSOR DATA - ČTENÍ HODNOT SENZORŮ
+// SENSOR DATA - FOR ALL
 // ===============================
 static esp_err_t sensors_get_handler(httpd_req_t *req)
 {
@@ -362,7 +392,7 @@ static httpd_handle_t start_webserver(void)
             { "/settings", HTTP_GET, settings_get_handler, NULL },
             { "/web/style.css", HTTP_GET, style_get_handler, NULL },
             { "/upload", HTTP_POST, upload_post_handler, NULL },
-            
+            { "/move_xyz", HTTP_POST, move_xyz_post_handler, NULL },
             { "/wifi_reset", HTTP_POST, wifi_reset_post_handler, NULL },
             { "/wifi_config", HTTP_ANY, wifi_config_handler, NULL },
         };

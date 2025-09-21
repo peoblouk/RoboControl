@@ -8,7 +8,7 @@
 #include "esp_log.h"
 #include "wifi_servo_server.h" // Wi-Fi and Servo Control Server
 #include "robot_io.h"          // Robotic Arm Kinematics
-#include "esp_spiffs.h" 
+#include "esp_spiffs.h"
 
 static void init_spiffs(void); // Initialize SPIFFS (File System)
 
@@ -24,9 +24,8 @@ void app_main(void)
 
     wifi_servo_server_start(); // Start Wi-Fi and Servo Control Server
     
-    servos_init();
-    sensors_init();
-    //calculation();
+    servos_init(); // Initialize servos
+    sensors_init(); // Initialize sensors
 }
 
 static void init_spiffs(void) { // Init File System

@@ -33,6 +33,26 @@
 
       document.getElementById(`servo-value-${servoId}`).textContent = angle + '°';
     }
+    // Move to XYZ
+    function moveXYZ() {
+      const x = parseFloat(document.getElementById('x').value);
+      const y = parseFloat(document.getElementById('y').value);
+      const z = parseFloat(document.getElementById('z').value);
+
+      if (isNaN(x) || isNaN(y) || isNaN(z)) {
+        alert("Please enter valid numbers for X, Y, Z.");
+        return;
+      }
+
+      fetch('/move_xyz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: x, y: y, z: z })
+      })
+        .then(r => r.text())
+        .then(data => alert("Moving to X:" + x + " Y:" + y + " Z:" + z))
+        .catch(err => alert("Error: " + err));
+    }
 
     // Read sensors
     function readSensors() {
@@ -116,10 +136,31 @@
 
   <!-- Servos Control -->
   <div class="main-container">
+    <div class="container">
+      <h1>Move to XYZ</h1>
+
+      <div class="form-group">
+        <label for="x">X [mm]:</label>
+        <input type="number" id="x" step="1" value="100">
+      </div>
+
+      <div class="form-group">
+        <label for="y">Y [mm]:</label>
+        <input type="number" id="y" step="1" value="0">
+      </div>
+
+      <div class="form-group">
+        <label for="z">Z [mm]:</label>
+        <input type="number" id="z" step="1" value="50">
+      </div>
+
+      <button onclick="moveXYZ()">Move</button>
+    </div>
+
     <!-- Left Column - Servo Control -->
     <div class="column">
       <div class="container">
-        <h1>Servo Control</h1>
+        <h1>Servo Control - joint space</h1>
         <div id="servo-controls">
           <!-- Servo 0 -->
           <div class="servo-control">

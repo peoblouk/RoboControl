@@ -28,7 +28,6 @@ sensor_t sensors[SENSOR_COUNT] = {
     //{ .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_7 },  // IO18 (reservation)
 };
 
-
 // ===============================
 // Inicialization of servos
 // ===============================
@@ -67,6 +66,34 @@ void servos_init(void)
 // ===============================
 // Inicialization of sensors
 // ===============================
+void move_to_position(float q_target[SERVO_COUNT]) {
+    float q_current[SERVO_COUNT];
+    for (int i = 0; i < SERVO_COUNT; i++) {
+        q_current[i] = sensor_read_angle(i);
+    }
+
+    float max_diff = 0;
+    for (int i = 0; i < SERVO_COUNT; i++) {
+        float diff = fabsf(q_target[i] - q_current[i]);
+        if (diff > max_diff) max_diff = diff;
+    }
+
+    int steps = INTERP_STEPS;
+    if (max_diff > 0) {
+        
+        for (int s = 0; s <= steps; s++) {
+            for (int i = 0; i < SERVO_COUNT; i++) {
+                float q = q_current[i] + (q_target[i] - q_current[i]) * ((float)s / steps);
+                servo_set_angle(i, q);
+            }
+            vTaskDelay(pdMS_TO_TICKS(INTERP_DELAY_MS));
+        }
+    }
+}
+
+// ===============================
+// Inicialization of sensors
+// ===============================
 void sensors_init(void) {
     adc1_config_width(ADC_WIDTH_BIT_12);
 
@@ -85,6 +112,30 @@ void sensors_init(void) {
     {
         ESP_LOGE(TAG, "Servo and sensor count mismatch");
     }
+}
+
+// ===============================
+// Set servo angle (0–180°)
+// ===============================
+void servo_set_angle(int servo_id, float angle) {
+    if (servo_id < 0 || servo_id >= SERVO_COUNT) {
+        ESP_LOGW(TAG, "Invalid servo ID: %d", servo_id);
+        return;
+    }
+
+    if (angle < 0) angle = 0;
+    if (angle > 180) angle = 180;
+
+    // Angle to duty cycle (14bit = 0–16383)
+    uint32_t duty_min = (uint32_t)(0.5f / 20.0f * 16384);  // 0.5 ms 
+    uint32_t duty_max = (uint32_t)(2.5f / 20.0f * 16384);  // 2.5 ms
+    uint32_t duty = duty_min + ((duty_max - duty_min) * angle) / 180;
+
+    // Set PWM for the channel
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel);
+
+    ESP_LOGI(TAG, "Servo %d set to %.1f°", servo_id, angle);
 }
 
 // ===============================
