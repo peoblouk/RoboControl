@@ -31,7 +31,7 @@ typedef struct {
 #include "robot_io.h"  // Robotic Arm Kinematics
 
 // ===============================
-// Function Prototypes
+// FUNCTION PROTOTYPES
 // ===============================
 void wifi_servo_server_start(void);
 void save_wifi_config(const char *ssid, const char *pass);

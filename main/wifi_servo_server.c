@@ -78,10 +78,11 @@ esp_err_t move_xyz_post_handler(httpd_req_t *req) {
 
         ESP_LOGI("MOVE_XYZ", "Target position: X=%.2f, Y=%.2f, Z=%.2f", x, y, z);
 
-        // TODO: volání inverzní kinematiky -> převede (x,y,z) na úhly q_target[]
-        // float q_target[SERVO_COUNT];
-        // inverse_kinematics(x, y, z, q_target);
-        // move_to_position(q_target);
+        // TODO: Implement inverse kinematics to get servo angles
+        float q_target[SERVO_COUNT];
+
+        //inverse_kinematics(x, y, z, q_target);
+        move_to_position(q_target);
 
         httpd_resp_sendstr(req, "Move command accepted");
     } else {

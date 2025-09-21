@@ -29,7 +29,7 @@ sensor_t sensors[SENSOR_COUNT] = {
 };
 
 // ===============================
-// Inicialization of servos
+// INICIALIZATION OF SERVOS
 // ===============================
 void servos_init(void)
 {
@@ -64,7 +64,15 @@ void servos_init(void)
 }
 
 // ===============================
-// Inicialization of sensors
+// INVERSE KINEMATICS
+// ===============================
+void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
+{
+    // TODO: Implement the actual inverse kinematics calculations here
+}
+
+// ===============================
+// INVERSE KINEMATICS
 // ===============================
 void move_to_position(float q_target[SERVO_COUNT]) {
     float q_current[SERVO_COUNT];
@@ -92,7 +100,7 @@ void move_to_position(float q_target[SERVO_COUNT]) {
 }
 
 // ===============================
-// Inicialization of sensors
+// INICIALIZATION OF SENSORS
 // ===============================
 void sensors_init(void) {
     adc1_config_width(ADC_WIDTH_BIT_12);
@@ -115,7 +123,7 @@ void sensors_init(void) {
 }
 
 // ===============================
-// Set servo angle (0–180°)
+// SET SERVO ANGLE (0–180°)
 // ===============================
 void servo_set_angle(int servo_id, float angle) {
     if (servo_id < 0 || servo_id >= SERVO_COUNT) {
@@ -139,7 +147,7 @@ void servo_set_angle(int servo_id, float angle) {
 }
 
 // ===============================
-// Sensor read raw data (return value 0–4095)
+// SENSOR READ RAW DATA (0–4095)
 // ===============================
 int sensor_read_raw(int id) {
     if (id < 0 || id >= SENSOR_COUNT) return -1;
@@ -160,7 +168,7 @@ int sensor_read_raw(int id) {
 }
 
 // ===============================
-// Sensor read angle (0-180°)
+// SENSOR READ ANGLE (0-180°)
 // ===============================
 float sensor_read_angle(int id) {
     int raw = sensor_read_raw(id);
