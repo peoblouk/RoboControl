@@ -23,7 +23,6 @@ sensor_t sensors[SENSOR_COUNT] = {
     { .unit = ADC_UNIT_1, .channel = ADC_CHANNEL_5 },  // IO6
     { .unit = ADC_UNIT_1, .channel = ADC_CHANNEL_6 },  // IO7
     { .unit = ADC_UNIT_1, .channel = ADC_CHANNEL_7 },  // IO12
-
     { .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_6 },  // IO17
     //{ .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_7 },  // IO18 (reservation)
 };
@@ -72,7 +71,7 @@ void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
 }
 
 // ===============================
-// INVERSE KINEMATICS
+// MOVE TO POSITION (interpolated)
 // ===============================
 void move_to_position(float q_target[SERVO_COUNT]) {
     float q_current[SERVO_COUNT];
@@ -80,7 +79,7 @@ void move_to_position(float q_target[SERVO_COUNT]) {
         q_current[i] = sensor_read_angle(i);
     }
 
-    float max_diff = 0;
+    float max_diff = 0; // Maximum angle difference
     for (int i = 0; i < SERVO_COUNT; i++) {
         float diff = fabsf(q_target[i] - q_current[i]);
         if (diff > max_diff) max_diff = diff;
@@ -88,10 +87,9 @@ void move_to_position(float q_target[SERVO_COUNT]) {
 
     int steps = INTERP_STEPS;
     if (max_diff > 0) {
-        
         for (int s = 0; s <= steps; s++) {
             for (int i = 0; i < SERVO_COUNT; i++) {
-                float q = q_current[i] + (q_target[i] - q_current[i]) * ((float)s / steps);
+                float q = q_current[i] + (q_target[i] - q_current[i]) * ((float)s / steps); 
                 servo_set_angle(i, q);
             }
             vTaskDelay(pdMS_TO_TICKS(INTERP_DELAY_MS));

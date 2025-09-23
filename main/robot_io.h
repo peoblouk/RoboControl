@@ -51,5 +51,5 @@ int sensor_read_raw(int id);
 float sensor_read_angle(int id);
 void servo_set_angle(int servo_id, float angle);
 void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT]);
-
+void move_to_position(float q_target[SERVO_COUNT]);
 #endif // ROBOT_IO

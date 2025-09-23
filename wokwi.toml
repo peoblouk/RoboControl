@@ -1,0 +1,29 @@
+[wokwi]
+version = 1
+firmware = 'build/flasher_args.json'
+elf = 'build/https_server.elf'
+
+#firmware = 'build/https_server.bin'
+board = 'ESP32-S3'
+
+[connections]
+# Serva
+'esp32s3:35' = 'servo:0'
+'esp32s3:36' = 'servo:1'
+'esp32s3:37' = 'servo:2'
+'esp32s3:39' = 'servo:3'
+'esp32s3:40' = 'servo:4'
+'esp32s3:41' = 'servo:5'
+
+# Potenciometry (ADC senzory úhlů)
+'esp32s3:4'  = 'pot:0'
+'esp32s3:5'  = 'pot:1'
+'esp32s3:6'  = 'pot:2'
+'esp32s3:7'  = 'pot:3'
+'esp32s3:12' = 'pot:4'
+'esp32s3:17' = 'pot:5'
+
+[net]
+#wifi = true
+# forward port 80 from ESP32 to localhost:8180
+port = 8180
