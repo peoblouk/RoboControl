@@ -58,6 +58,7 @@ static void init_spiffs(void) { // Init File System
     ESP_LOGI("SPIFFS", "Partition size: total: %d, used: %d", total, used);
 }
 
+/*
 // ===============================
 // TEST SERVO MOVEMENT
 #include "robot_io.h"
@@ -69,7 +70,7 @@ static void servo_test_task(void) {
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
-
+*/
 
 
 // ===============================

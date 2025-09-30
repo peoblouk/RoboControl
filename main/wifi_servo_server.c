@@ -210,6 +210,14 @@ static esp_err_t ws_handler(httpd_req_t *req) {
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
     if (ret != ESP_OK || frame.len == 0) return ESP_FAIL;
 
+    if (frame.type == HTTPD_WS_TYPE_CLOSE) {
+        int fd = httpd_req_to_sockfd(req);
+        ws_clients_remove(fd);
+        return ESP_OK;
+    }
+
+    if (frame.len == 0) return ESP_FAIL;
+
     frame.payload = malloc(frame.len + 1);
     if (!frame.payload) return ESP_ERR_NO_MEM;
 
@@ -353,14 +361,14 @@ static httpd_handle_t start_webserver(void) {
     if (httpd_start(&g_httpd,&config)!=ESP_OK) return NULL;
 
     httpd_uri_t uris[] = {
-        { "/", HTTP_GET, root_get_handler, NULL },
-        { "/status", HTTP_GET, status_get_handler, NULL },
-        { "/settings", HTTP_GET, settings_get_handler, NULL },
-        { "/web/style.css", HTTP_GET, style_get_handler, NULL },
-        { "/upload", HTTP_POST, upload_post_handler, NULL },
-        { "/wifi_reset", HTTP_POST, wifi_reset_post_handler, NULL },
-        { "/wifi_config", HTTP_ANY, wifi_config_handler, NULL },
-        { "/ws", HTTP_GET, ws_handler, NULL, .is_websocket = true, .handle_ws_control_frames = true }
+    { "/", HTTP_GET, root_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+    { "/status", HTTP_GET, status_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+    { "/settings", HTTP_GET, settings_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+    { "/web/style.css", HTTP_GET, style_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+    { "/upload", HTTP_POST, upload_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+    { "/wifi_reset", HTTP_POST, wifi_reset_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+    { "/wifi_config", HTTP_ANY, wifi_config_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+    { "/ws", HTTP_GET, ws_handler, NULL, .is_websocket = true, .handle_ws_control_frames = true }
     };
 
     for (int i=0; i<sizeof(uris)/sizeof(uris[0]); i++)
