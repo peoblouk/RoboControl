@@ -89,17 +89,3 @@ idf.py set-target esp32s3
 idf.py build
 idf.py -p COMx flash monitor
 (nahraď COMx portem svého ESP32-S3)
-
-🛠️ TODO
-vylepšená inverzní kinematika (6DOF)
-
-interpolace dráhy (trajektorie místo point-to-point)
-
-webová vizualizace polohy ramen
-
-yaml
-Zkopírovat kód
-
----
-
-Chceš, abych ti tam ještě dopsal i ukázku, jak posílat příkazy přes **Python script (pyserial)** pro 
