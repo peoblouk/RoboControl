@@ -33,7 +33,11 @@ void app_main(void)
     xTaskCreate(uart_cmd_task, "uart_cmd_task", 4096, NULL, 5, NULL);
 }
 
-static void init_spiffs(void) { // Init File System
+
+// ===============================
+// INIT SPIFFS
+// ===============================
+static void init_spiffs(void) {
     esp_vfs_spiffs_conf_t conf = {
         .base_path = "/spiffs",
         .partition_label = NULL,
@@ -61,6 +65,7 @@ static void init_spiffs(void) { // Init File System
 /*
 // ===============================
 // TEST SERVO MOVEMENT
+// ===============================
 #include "robot_io.h"
 static void servo_test_task(void) {
     while (1) {

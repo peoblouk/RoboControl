@@ -32,7 +32,7 @@ typedef struct {
 
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "robot_io.h"  // Robotic Arm Kinematics
+#include "robot_io.h"  // Robot IO (servos, sensors)
 
 // ===============================
 // FUNCTION PROTOTYPES

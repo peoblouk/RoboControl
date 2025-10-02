@@ -1,3 +1,7 @@
+// ===============================
+// uart_receive.c
+// ===============================
+
 #include "uart_receive.h"
 
 static const char *TAG = "uart_receive";
@@ -38,7 +42,6 @@ void uart_cmd_task(void *arg) {
                 char c = (char)data[i];
 
                 if (c == '\n' || c == '\r') {
-                    // konec příkazu -> zpracuj
                     line_buf[line_pos] = '\0';
                     if (line_pos > 0) {
                         ESP_LOGI(TAG, "UART CMD: %s", line_buf);
@@ -78,7 +81,7 @@ void uart_cmd_task(void *arg) {
                             uart_write_bytes(UART_PORT_NUM, "ERR Unknown command\n", 20);
                         }
                     }
-                    line_pos = 0; // reset bufferu
+                    line_pos = 0;   
                 }
                 else {
                     if (line_pos < LINE_BUF_SIZE-1) {

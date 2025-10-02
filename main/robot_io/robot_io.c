@@ -1,5 +1,5 @@
 // ===============================
-// robotic_arm.c
+// robot_io.c
 // ===============================
 
 #include "robot_io.h"
@@ -154,7 +154,6 @@ void servo_set_angle(int servo_id, float angle) {
     uint32_t duty_max = (uint32_t)(2.5f / 20.0f * 16384);  // 2.5 ms
     uint32_t duty = duty_min + ((duty_max - duty_min) * angle) / 180;
 
-    // Set PWM for the channel
     ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel);
 
@@ -188,5 +187,5 @@ int sensor_read_raw(int id) {
 float sensor_read_angle(int id) {
     int raw = sensor_read_raw(id);
     if (raw < 0) return -1;
-    return (raw / 4095.0f) * 180.0f;  // lineární mapování 0–180°
+    return (raw / 4095.0f) * 180.0f;
 }

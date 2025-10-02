@@ -1,5 +1,5 @@
 // ===============================
-// robotic_arm.c
+// robot_io.c
 // ===============================
 
 #ifndef ROBOT_IO
@@ -35,7 +35,7 @@
 #define DEG2RAD(x) ((x) * M_PI / 180.0f)
 
 // ===============================
-// Servo Configuration (PWM output)
+// SERVO CONFIGURATION (PWM output)
 // ===============================
 typedef struct {
     ledc_channel_t channel;
@@ -45,7 +45,7 @@ typedef struct {
 extern servo_t servos[SERVO_COUNT];
 
 // ===============================
-// Sensor Configuration (ADC input)
+//  SENSOR CONFIGURATION (ADC input)
 // ===============================
 typedef struct {
     adc_unit_t unit;
@@ -54,7 +54,7 @@ typedef struct {
 
 extern sensor_t sensors[SENSOR_COUNT];
 // ===============================
-// Function Prototypes
+// FUNCTION PROTOTYPES
 // ===============================
 void servos_init(void);
 void sensors_init(void);
@@ -63,4 +63,5 @@ float sensor_read_angle(int id);
 void servo_set_angle(int servo_id, float angle);
 void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT]);
 void move_to_position(float q_target[SERVO_COUNT]);
+
 #endif // ROBOT_IO
