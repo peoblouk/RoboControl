@@ -1,4 +1,4 @@
-# ESP32-S3 Robotic Arm Controller
+# Ovládání modelu manipulátoru pomocí ESP32-S3
 
 Tento projekt je ukázka řízení 6DOF robotického ramene pomocí **ESP32-S3**.  
 Implementuje ovládání servomotorů, čtení senzorů a základní inverzní kinematiku.  
