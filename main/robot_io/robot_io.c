@@ -62,7 +62,7 @@ void servos_init(void)
 }
 
 // ===============================
-// INVERSE KINEMATICS
+// INVERSE KINEMATICS (triangulation)
 // ===============================
 void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
 {
