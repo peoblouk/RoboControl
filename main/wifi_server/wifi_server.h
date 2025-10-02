@@ -1,9 +1,9 @@
 // ===============================
-// wifi_servo_server.h
+// wifi_server.h
 // ===============================
 
-#ifndef WIFI_SERVO_SERVER
-#define WIFI_SERVO_SERVER
+#ifndef WIFI_SERVER
+#define WIFI_SERVER
 
 #define WIFI_SSID      "ESP32-RoboticArm"
 #define WIFI_PASS      "RoboticArm123"   

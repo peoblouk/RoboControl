@@ -1,8 +1,8 @@
 // ===============================
-// wifi_servo_server.c
+// wifi_server.c
 // ===============================
 
-#include "wifi_servo_server.h"
+#include "wifi_server.h"
 
 // ===============================
 // GLOBAL CONFIG
