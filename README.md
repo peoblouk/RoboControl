@@ -67,7 +67,7 @@ main/
 |----------------|--------------------------------------------|-----------------|
 | `SERVO id ang` | Nastaví servo na zadaný úhel (0–180°)      | `SERVO 0 90`    |
 | `MOVE x y z`   | Pohne ramenem do souřadnic (IK triangulace)| `MOVE 10 20 30` |
-| `SENSORS?`     | Vrátí úhly ze všech senzorů                | `SENSORS?`      |
+| `SENSORS`     | Vrátí úhly ze všech senzorů                | `SENSORS?`      |
 
 ---
 
@@ -88,4 +88,3 @@ main/
 idf.py set-target esp32s3
 idf.py build
 idf.py -p COMx flash monitor
-(nahraď COMx portem svého ESP32-S3)
