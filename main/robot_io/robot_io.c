@@ -66,71 +66,25 @@ void servos_init(void)
 // ===============================
 void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
 {
-    if (q_target == NULL) return;
+    float q0 = atan2f(y, x);
 
-    float q0_rad = atan2f(y, x); // base rotation
-    float q0_deg = RAD2DEG(q0_rad);
+    float R = sqrtf(x*x + y*y);
+    float d = sqrtf(R*R + z*z);
 
-    float R = sqrtf(x*x + y*y);       
-    float r = R - L1;                 
-    float D = L0 - z;                 
-
-    ESP_LOGI(TAG, "IK target raw: x=%.2f y=%.2f z=%.2f -> R=%.2f r=%.2f D=%.2f", x, y, z, R, r, D);
-
-    float a = L2;
-    float b = L3 + L4;
-
-    float d2 = r*r + D*D;
-    float d = sqrtf(d2);
-
-    if (d > (a + b) + 1e-6f) {
-        ESP_LOGE(TAG, "Target is out of reach (d=%.2f, a+b=%.2f)", d, a+b);
-        for (int i=0;i<SERVO_COUNT;i++) q_target[i] = NAN;
-        return;
-    }
-    if (d < fabsf(a - b) - 1e-6f) {
-        ESP_LOGE(TAG, "Target too close (d=%.2f, |a-b|=%.2f)", d, fabsf(a-b));
-        for (int i=0;i<SERVO_COUNT;i++) q_target[i] = NAN;
-        return;
-    }
-
-    // Cosine law to find q2
-    float cos_q2 = (d2 - a*a - b*b) / (2.0f * a * b);
+    float cos_q2 = (d*d - L1*L1 - L2*L2) / (2*L1*L2);
     if (cos_q2 > 1.0f) cos_q2 = 1.0f;
     if (cos_q2 < -1.0f) cos_q2 = -1.0f;
-    float q2_raw = acosf(cos_q2);
+    float q2 = acosf(cos_q2);
 
-    float q2_rad = -q2_raw;
 
-    float phi = atan2f(D, r);
+    float phi = atan2f(z, R);
+    float psi = atan2f(L2*sin(q2), L1 + L2*cos_q2);
+    float q1 = phi - psi;
 
-    float sin_q2 = sinf(q2_raw);
-    float k = b * sin_q2;
-    float denom = a + b * cos_q2;
-    float psi = atan2f(k, denom);
-    float q1_rad = phi - psi;
-
-    float q3_rad = 0.0f;
-    float q4_rad = 0.0f;
-    float q5_rad = 0.0f;
-
-    // Převod do stupňů
-    float q1_deg = RAD2DEG(q1_rad);
-    float q2_deg = RAD2DEG(q2_rad);
-    float q3_deg = RAD2DEG(q3_rad);
-    float q4_deg = RAD2DEG(q4_rad);
-    float q5_deg = RAD2DEG(q5_rad);
-
-    q_target[0] = q0_deg;
-    q_target[1] = q1_deg;
-    q_target[2] = q2_deg;
-    q_target[3] = q3_deg;
-    q_target[4] = q4_deg;
-    q_target[5] = q5_deg;
-
-    ESP_LOGI(TAG, "IK solved: q0=%.2f q1=%.2f q2=%.2f q3=%.2f", q_target[0], q_target[1], q_target[2], q_target[3]);
-    // Note: Joint limits are not enforced here
-    // for (int i=0;i<6;i++) { if (!isnan(q_target[i])) { if (q_target[i] < 0) q_target[i] = 0; if (q_target[i] > 180) q_target[i] = 180; } }
+    q_target[0] = RAD2DEG(q0);
+    q_target[1] = RAD2DEG(q1);
+    q_target[2] = RAD2DEG(q2);
+    for (int i = 3; i < SERVO_COUNT; i++) q_target[i] = 90;
 }
 
 // ===============================
