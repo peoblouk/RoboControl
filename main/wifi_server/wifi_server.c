@@ -85,6 +85,27 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
     return httpd_resp_send(req, resp, strlen(resp));
 }
 
+static esp_err_t icon_get_handler(httpd_req_t *req) {
+    FILE *f = fopen("/spiffs/web/esp32_robotic_arm.ico", "rb");
+    if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
+
+    httpd_resp_set_type(req, "image/x-icon");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=2592000"); // 30 dní cache
+
+    char buf[512];
+    size_t r;
+    while ((r = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (httpd_resp_send_chunk(req, buf, r) != ESP_OK) {
+            fclose(f);
+            httpd_resp_sendstr_chunk(req, NULL);
+            return ESP_FAIL;
+        }
+    }
+    fclose(f);
+    httpd_resp_sendstr_chunk(req, NULL);
+    return ESP_OK;
+}
+
 static esp_err_t wifi_config_handler(httpd_req_t *req) {
     if (req->method == HTTP_GET) {
         httpd_resp_sendstr(req, "Use POST to configure WiFi.");
@@ -501,6 +522,8 @@ static httpd_handle_t start_webserver(void) {
         { "/status", HTTP_GET, status_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/settings", HTTP_GET, settings_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/web/style.css", HTTP_GET, style_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+        { "/web/esp32_robotic_arm.ico", HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
+        { "/favicon.ico",               HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
         { "/wifi_reset", HTTP_POST, wifi_reset_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/wifi_config", HTTP_ANY, wifi_config_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/ws", HTTP_GET, ws_handler, NULL, .is_websocket = true, .handle_ws_control_frames = true },
