@@ -98,7 +98,7 @@ void move_to_position(float q_target[SERVO_COUNT]) {
         q_current[i] = sensor_read_angle(i);
     }
 
-    float max_diff = 0; // Maximum angle difference
+    float max_diff = 0; // maximum angle difference
     for (int i = 0; i < SERVO_COUNT; i++) {
         float diff = fabsf(q_target[i] - q_current[i]);
         if (diff > max_diff) max_diff = diff;
@@ -202,7 +202,7 @@ static void robot_control_task(void *arg)
     robot_cmd_t cmd;
 
     while (1) {
-        // Čekáme na příkaz ve frontě
+        // wait for command
         if (xQueueReceive(s_robot_queue, &cmd, portMAX_DELAY) == pdTRUE) {
 
             switch (cmd.type) {
@@ -247,7 +247,7 @@ void robot_control_start(void)
 }
 
 // ===============================
-// API: send command - MOVE_JOINTS
+// Send command - MOVE_JOINTS
 // ===============================
 bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
 {
@@ -263,7 +263,7 @@ bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
 }
 
 // ===============================
-// API: send command - MOVE_XYZ
+// Send command - MOVE_XYZ
 // ===============================
 bool robot_cmd_move_xyz(float x, float y, float z)
 {

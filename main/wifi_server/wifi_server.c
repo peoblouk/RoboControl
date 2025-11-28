@@ -225,19 +225,25 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             cJSON_Delete(root);
         }
 
-        // MOVE XYZ
-        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"move_xyz")==0) {
+        // MOVE XYZ (queued into robot control task)
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"move_xyz") == 0) {
             cJSON *jx = cJSON_GetObjectItem(json, "x");
             cJSON *jy = cJSON_GetObjectItem(json, "y");
             cJSON *jz = cJSON_GetObjectItem(json, "z");
+
             if (cJSON_IsNumber(jx) && cJSON_IsNumber(jy) && cJSON_IsNumber(jz)) {
-                float x = jx->valuedouble;
-                float y = jy->valuedouble;
-                float z = jz->valuedouble;
-                float q_target[SERVO_COUNT];
-                inverse_kinematics(x,y,z,q_target);
-                move_to_position(q_target);
-                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"ok\",\"cmd\":\"move_xyz\"}");
+                float x = (float)jx->valuedouble;
+                float y = (float)jy->valuedouble;
+                float z = (float)jz->valuedouble;
+
+                bool ok = robot_cmd_move_xyz(x, y, z);
+                int fd  = httpd_req_to_sockfd(req);
+
+                if (ok) {
+                    ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"move_xyz\",\"queued\":true}");
+                } else {
+                    ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"move_xyz\",\"reason\":\"queue_full_or_not_started\"}");
+                }
             }
         }
 

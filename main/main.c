@@ -6,17 +6,16 @@
 #include "nvs_flash.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
-#include <string.h>
 #include "wifi_server.h"    // Wi-Fi and Servo Control Server
 #include "robot_io.h"       // Robotic Arm Kinematics
-//#include "uart_receive.h" // UART Receive
-#include "core_config.h"   // Core Configuration
+#include "core_config.h"    // Core Configuration
+#include "cmd_control.h"    // Command Control
 
-#define CMD_BUF_SIZE 128
+//! UART for receiving commands from another ESP32
+//#include "uart_receive.h" // UART Receive
+//void uart_cmd_task(void *arg);
 
 static void init_spiffs(void); // Initialize SPIFFS (File System)
-void uart_cmd_task(void *arg);
-void console_task(void *arg);
 
 void app_main(void)
 {
@@ -29,16 +28,14 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     wifi_servo_server_start(); // Start Wi-Fi and Servo Control Server
-    
-    servos_init(); // Initialize servos
-    sensors_init(); // Initialize sensors
+    servos_init();             // Initialize servos
+    sensors_init();            // Initialize sensors
+    robot_control_start();     // Start robot control task
+    cmd_control_start();       // Start command control task
 
     //! UART for receiving commands from another ESP32
     //uart1_init(); // Initialize UART1
     //xTaskCreate(uart_cmd_task, "uart_cmd_task", 4096, NULL, 5, NULL);
-
-    //xTaskCreate(console_task, "console_task", 4096, NULL, 5, NULL);
-    xTaskCreatePinnedToCore(console_task, "console_task", 4096, NULL, 5, NULL, CORE_ROBOT);
 }
 
 
@@ -69,78 +66,3 @@ static void init_spiffs(void) {
     esp_spiffs_info(NULL, &total, &used);
     ESP_LOGI("SPIFFS", "Partition size: total: %d, used: %d", total, used);
 }
-
-// ===============================
-// CONSOLE TASK
-// ===============================
-void console_task(void *arg) {
-    char buf[CMD_BUF_SIZE];
-    int pos = 0;
-
-    while (1) {
-        int c = getchar();   // čeká na znak z UART0
-        if (c == EOF) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-
-        if (c == '\r' || c == '\n') {
-            putchar('\n');  // odřádkujeme
-            buf[pos] = '\0';
-
-            if (pos > 0) {
-                // === Parsování příkazů ===
-                if (strncmp(buf, "SERVO", 5) == 0) {
-                    int id; float angle;
-                    if (sscanf(buf, "SERVO %d %f", &id, &angle) == 2) {
-                        servo_set_angle(id, angle);
-                        printf("OK: Servo %d -> %.1f°\n", id, angle);
-                    }
-                } else if (strncmp(buf, "MOVE", 4) == 0) {
-                    float x,y,z;
-                    if (sscanf(buf, "MOVE %f %f %f", &x,&y,&z) == 3) {
-                        float q_target[SERVO_COUNT];
-                        inverse_kinematics(x,y,z,q_target);
-                        move_to_position(q_target);
-                        printf("OK: Move to X=%.1f Y=%.1f Z=%.1f\n", x,y,z);
-                    }
-                } else if (strcmp(buf,"SENSORS")==0) {
-                    for (int i=0;i<SENSOR_COUNT;i++) {
-                        printf("Sensor %d: %.1f°\n", i, sensor_read_angle(i));
-                    }
-                } else {
-                    printf("ERR: Unknown command '%s'\n", buf);
-                }
-            }
-
-            pos = 0; // reset bufferu
-            printf("> "); // prompt
-        }
-        else if (c == 0x08 || c == 0x7F) { 
-            // Backspace
-            if (pos > 0) {
-                pos--;
-                printf("\b \b");
-            }
-        }
-        else if (pos < CMD_BUF_SIZE-1) {
-            buf[pos++] = (char)c;
-            putchar(c); // echo znak
-        }
-    }
-}
-
-/*
-// ===============================
-// TEST SERVO MOVEMENT
-// ===============================
-#include "robot_io.h"
-static void servo_test_task(void) {
-    while (1) {
-        servo_set_angle(0, 180);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-        servo_set_angle(0, 0);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-    }
-}
-*/
