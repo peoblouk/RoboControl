@@ -1,6 +1,5 @@
 // ===============================
 // cmd_control.c
-// Simple UART console for robot control
 // ===============================
 
 #include "cmd_control.h"

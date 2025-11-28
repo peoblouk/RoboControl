@@ -27,9 +27,10 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    wifi_servo_server_start(); // Start Wi-Fi and Servo Control Server
     servos_init();             // Initialize servos
     sensors_init();            // Initialize sensors
+
+    wifi_servo_server_start(); // Start Wi-Fi and Servo Control Server
     robot_control_start();     // Start robot control task
     cmd_control_start();       // Start command control task
 
@@ -37,7 +38,6 @@ void app_main(void)
     //uart1_init(); // Initialize UART1
     //xTaskCreate(uart_cmd_task, "uart_cmd_task", 4096, NULL, 5, NULL);
 }
-
 
 // ===============================
 // INIT SPIFFS
