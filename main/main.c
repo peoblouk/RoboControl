@@ -10,6 +10,7 @@
 #include "robot_io.h"       // Robotic Arm Kinematics
 #include "core_config.h"    // Core Configuration
 #include "cmd_control.h"    // Command Control
+#include "rt_stats.h"       // Real-time statistics
 
 //! UART for receiving commands from another ESP32
 //#include "uart_receive.h" // UART Receive
