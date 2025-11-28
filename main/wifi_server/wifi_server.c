@@ -548,5 +548,5 @@ void wifi_servo_server_start(void) {
 
     wifi_init_softap();
     start_webserver();
-    xTaskCreate(ws_task_sensors,"ws_sensors",4096,NULL,5,NULL);
+    xTaskCreatePinnedToCore(ws_task_sensors, "ws_sensors", 4096, NULL, 5, NULL, CORE_ROBOT);
 }

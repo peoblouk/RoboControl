@@ -10,6 +10,7 @@
 #include "wifi_server.h"    // Wi-Fi and Servo Control Server
 #include "robot_io.h"       // Robotic Arm Kinematics
 //#include "uart_receive.h" // UART Receive
+#include "core_config.h"   // Core Configuration
 
 #define CMD_BUF_SIZE 128
 
@@ -36,7 +37,8 @@ void app_main(void)
     //uart1_init(); // Initialize UART1
     //xTaskCreate(uart_cmd_task, "uart_cmd_task", 4096, NULL, 5, NULL);
 
-    xTaskCreate(console_task, "console_task", 4096, NULL, 5, NULL);
+    //xTaskCreate(console_task, "console_task", 4096, NULL, 5, NULL);
+    xTaskCreatePinnedToCore(console_task, "console_task", 4096, NULL, 5, NULL, CORE_ROBOT);
 }
 
 

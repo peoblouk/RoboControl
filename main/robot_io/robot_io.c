@@ -26,6 +26,9 @@ sensor_t sensors[SENSOR_COUNT] = {
     //{ .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_7 },  // IO18 (reservation)
 };
 
+// Queue for robot commands
+static QueueHandle_t s_robot_queue = NULL;
+
 // ===============================
 // INICIALIZATION OF SERVOS
 // ===============================
@@ -103,7 +106,7 @@ void move_to_position(float q_target[SERVO_COUNT]) {
 
     int steps = INTERP_STEPS;
     if (max_diff > 0) {
-        for (int s = 0; s <= steps; s++) {
+        for (int s = 0; s <= steps; s++) { // interpolation steps
             for (int i = 0; i < SERVO_COUNT; i++) {
                 float q = q_current[i] + (q_target[i] - q_current[i]) * ((float)s / steps); 
                 servo_set_angle(i, q);
@@ -187,4 +190,90 @@ float sensor_read_angle(int id) {
     int raw = sensor_read_raw(id);
     if (raw < 0) return -1;
     return (raw / 4095.0f) * 180.0f;
+}
+
+// ===============================
+// ROBOT CONTROL TASK
+// ===============================
+static void robot_control_task(void *arg)
+{
+    ESP_LOGI(TAG, "robot_control_task running on core %d", xPortGetCoreID());
+
+    robot_cmd_t cmd;
+
+    while (1) {
+        // Čekáme na příkaz ve frontě
+        if (xQueueReceive(s_robot_queue, &cmd, portMAX_DELAY) == pdTRUE) {
+
+            switch (cmd.type) {
+                case ROBOT_CMD_MOVE_JOINTS:
+                    ESP_LOGI(TAG, "ROBOT_CMD_MOVE_JOINTS");
+                    move_to_position(cmd.q_target);
+                    break;
+
+                case ROBOT_CMD_MOVE_XYZ:
+                    ESP_LOGI(TAG, "ROBOT_CMD_MOVE_XYZ to (%.1f, %.1f, %.1f)",
+                              cmd.x, cmd.y, cmd.z);
+                    // calculate IK -> target angles
+                    inverse_kinematics(cmd.x, cmd.y, cmd.z, cmd.q_target);
+                    move_to_position(cmd.q_target);
+                    break;
+
+                default:
+                    ESP_LOGW(TAG, "Unknown robot command: %d", cmd.type);
+                    break;
+            }
+        }
+    }
+}
+
+// ===============================
+// START ROBOT CONTROL (queue + task)
+// ===============================
+void robot_control_start(void)
+{
+    // Fronta na max 8 příkazů
+    s_robot_queue = xQueueCreate(8, sizeof(robot_cmd_t));
+    if (s_robot_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create robot queue");
+        return;
+    }
+
+    BaseType_t res = xTaskCreatePinnedToCore(robot_control_task, "robot_ctrl", 4096, NULL, 6, NULL, CORE_ROBOT);
+
+    if (res != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create robot_control_task");
+    }
+}
+
+// ===============================
+// API: send command - MOVE_JOINTS
+// ===============================
+bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
+{
+    if (s_robot_queue == NULL) return false;
+
+    robot_cmd_t cmd = {0};
+    cmd.type = ROBOT_CMD_MOVE_JOINTS;
+    for (int i = 0; i < SERVO_COUNT; i++) {
+        cmd.q_target[i] = q_target[i];
+    }
+
+    return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
+}
+
+// ===============================
+// API: send command - MOVE_XYZ
+// ===============================
+bool robot_cmd_move_xyz(float x, float y, float z)
+{
+    if (s_robot_queue == NULL) return false;
+
+    robot_cmd_t cmd = {0};
+    cmd.type = ROBOT_CMD_MOVE_XYZ;
+    cmd.x = x;
+    cmd.y = y;
+    cmd.z = z;
+
+    return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
 }

@@ -12,6 +12,9 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "core_config.h"   // Core Configuration
+#include "freertos/queue.h"
+#include <stdbool.h>
 
 #define SERVO_COUNT 6
 #define SENSOR_COUNT 6
@@ -53,6 +56,7 @@ typedef struct {
 } sensor_t;
 
 extern sensor_t sensors[SENSOR_COUNT];
+
 // ===============================
 // FUNCTION PROTOTYPES
 // ===============================
@@ -63,5 +67,30 @@ float sensor_read_angle(int id);
 void servo_set_angle(int servo_id, float angle);
 void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT]);
 void move_to_position(float q_target[SERVO_COUNT]);
+
+// ===============================
+// ROBOT CONTROL – COMMAND API
+// ===============================
+
+// Type of robot command
+typedef enum {
+    ROBOT_CMD_NONE = 0,
+    ROBOT_CMD_MOVE_JOINTS,   // target joint angles
+    ROBOT_CMD_MOVE_XYZ       // target XYZ coordinates
+} robot_cmd_type_t;
+
+// Command structure
+typedef struct {
+    robot_cmd_type_t type;
+    float q_target[SERVO_COUNT];  // target joint angles
+    float x, y, z;                // target XYZ (for MOVE_XYZ)
+} robot_cmd_t;
+
+// Start control task (pinned to CORE_ROBOT)
+void robot_control_start(void);
+
+// API for other modules – send command to queue
+bool robot_cmd_move_joints(const float q_target[SERVO_COUNT]);
+bool robot_cmd_move_xyz(float x, float y, float z);
 
 #endif // ROBOT_IO
