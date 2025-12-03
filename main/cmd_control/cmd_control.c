@@ -5,6 +5,10 @@
 #include "cmd_control.h"
 
 static const char *TAG = "cmd_control";
+static rt_stats_t g_sensors_cmd_stats;
+static rt_stats_t g_servo_cmd_stats;
+static rt_stats_t g_move_cmd_stats;
+
 
 
 // ===============================
@@ -20,8 +24,23 @@ static int cmd_servo(int argc, char **argv) // servo <id> <angle>
     int   id    = atoi(argv[1]);
     float angle = strtof(argv[2], NULL);
 
+    // start measuring
+    int64_t t_start_us = esp_timer_get_time();
     servo_set_angle(id, angle);
-    printf("OK: Servo %d -> %.1f°\n", id, angle);
+
+    // end measuring 
+    int64_t t_end_us = esp_timer_get_time();
+    int64_t dt_us    = t_end_us - t_start_us;
+    rt_stats_add_sample(&g_servo_cmd_stats, dt_us);
+
+    #ifdef STATS_PRINT
+    printf("OK: Servo %d -> %.1f° (time: %lld us)\n", id, angle, (long long)dt_us);
+
+    if (g_servo_cmd_stats.count % 10 == 0) {
+        rt_stats_print("SERVO_CMD", &g_servo_cmd_stats);
+    }
+    #endif
+
     return 0;
 }
 
@@ -36,11 +55,29 @@ static int cmd_move(int argc, char **argv) // move <x> <y> <z>
     float y = strtof(argv[2], NULL);
     float z = strtof(argv[3], NULL);
 
-    if (robot_cmd_move_xyz(x, y, z)) {
-        printf("OK: Move to X=%.1f Y=%.1f Z=%.1f (queued)\n", x, y, z);
+    // start measuring
+    int64_t t_start_us = esp_timer_get_time();
+    bool res = robot_cmd_move_xyz(x, y, z);
+
+    // end measuring
+    int64_t t_end_us = esp_timer_get_time();
+    int64_t dt_us    = t_end_us - t_start_us;
+    rt_stats_add_sample(&g_move_cmd_stats, dt_us);
+
+    #ifdef STATS_PRINT
+    if (res) {
+        printf("OK: Move to X=%.1f Y=%.1f Z=%.1f (queued) (time: %lld us)\n", 
+               x, y, z, (long long)dt_us);
     } else {
-        printf("ERR: Robot queue full or not started\n");
+        printf("ERR: Robot queue full or not started (time: %lld us)\n", 
+               (long long)dt_us);
     }
+
+    if (g_move_cmd_stats.count % 10 == 0) {
+        rt_stats_print("MOVE_CMD", &g_move_cmd_stats);
+    }
+    #endif
+
     return 0;
 }
 
@@ -49,9 +86,28 @@ static int cmd_sensors(int argc, char **argv) // sensors
     (void)argc;
     (void)argv;
 
+    // start measuring
+    int64_t t_start_us = esp_timer_get_time();
+
     for (int i = 0; i < SENSOR_COUNT; i++) {
         printf("Sensor %d: %.1f°\n", i, sensor_read_angle(i));
     }
+
+    // end measuring
+    int64_t t_end_us = esp_timer_get_time();
+    int64_t dt_us    = t_end_us - t_start_us;
+    rt_stats_add_sample(&g_sensors_cmd_stats, dt_us);
+
+    #ifdef STATS_PRINT
+    printf("SENSORS time: %lld us (%.3f ms)\n",
+           (long long)dt_us,
+           dt_us / 1000.0f);
+
+    if (g_sensors_cmd_stats.count % 20 == 0) {
+        rt_stats_print("SENSORS_CMD", &g_sensors_cmd_stats);
+    }
+    #endif
+
     return 0;
 }
 
@@ -72,6 +128,107 @@ static int cmd_test(int argc, char **argv) // test
     } else {
         printf("ERR: Failed to queue all test moves\n");
     }
+    return 0;
+}
+
+static int cmd_print_file(int argc, char **argv) // print <filename>
+{
+    if (argc != 2) {
+        printf("Usage: print <filename>\n");
+        printf("Example: print test.gcode\n");
+        return 0;
+    }
+
+    const char *filename_arg = argv[1];
+    char full_path[128];
+
+    // Pokud uživatel zadal cestu začínající "/", použijeme ji tak jak je.
+    // Pokud ne, přidáme před to "/spiffs/data/"
+    if (filename_arg[0] == '/') {
+        snprintf(full_path, sizeof(full_path), "%s", filename_arg);
+    } else {
+        snprintf(full_path, sizeof(full_path), "%s/%s", FILE_STORAGE_PATH, filename_arg);
+    }
+
+    FILE *file = fopen(full_path, "r");
+    if (!file) {
+        printf("ERR: Cannot open file '%s'\n", full_path);
+        return 0;
+    }
+
+    printf("\n=== FILE CONTENT: %s ===\n", full_path);
+    char line[128];
+    int line_number = 1;
+
+    while (fgets(line, sizeof(line), file)) {
+        line[strcspn(line, "\r\n")] = 0; // Odstranění \n pro hezčí výpis
+        printf("%4d: %s\n", line_number, line);
+        line_number++;
+    }
+
+    printf("=== END OF FILE ===\n\n");
+    fclose(file);
+    return 0;
+}
+
+static int cmd_ls(int argc, char **argv) // ls
+{
+    const char *path = FILE_STORAGE_PATH; 
+    
+    DIR *dir = opendir(path);
+    if (!dir) {
+        printf("ERR: Cannot open directory '%s'. Is SPIFFS mounted?\n", path);
+        return 0;
+    }
+
+    printf("\nListing directory: %s\n", path);
+    printf("----------------------------------------\n");
+    printf("%-24s | %s\n", "Filename", "Size (bytes)");
+    printf("----------------------------------------\n");
+
+    struct dirent *ent;
+    struct stat st;
+    char fullpath[500];
+    int count = 0;
+
+    while ((ent = readdir(dir)) != NULL) {
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, ent->d_name);
+        
+        if (stat(fullpath, &st) == 0) {
+            printf("%-24s | %ld\n", ent->d_name, (long)st.st_size);
+        } else {
+            printf("%-24s | ?\n", ent->d_name);
+        }
+        count++;
+    }
+    
+    closedir(dir);
+    printf("----------------------------------------\n");
+    printf("Total files: %d\n\n", count);
+    return 0;
+}
+
+static int cmd_stats(int argc, char **argv) // stats
+{
+    (void)argc;
+    (void)argv;
+
+    if (g_sensors_cmd_stats.count == 0) {
+        printf("SENSORS_CMD: no samples yet. Run 'sensors' a few times.\n");
+        return 0;
+    }
+    if (g_servo_cmd_stats.count == 0) {
+        printf("SERVO_CMD: no samples yet. Run 'servo' a few times.\n");
+        return 0;
+    }
+    if (g_move_cmd_stats.count == 0) {
+        printf("MOVE_CMD: no samples yet. Run 'move' a few times.\n");
+        return 0;
+    }
+
+    rt_stats_print("SENSORS_CMD", &g_sensors_cmd_stats);
+    rt_starts_print("SERVO_CMD", &g_servo_cmd_stats);
+    rt_stats_print("MOVE_CMD", &g_move_cmd_stats);
     return 0;
 }
 
@@ -115,6 +272,33 @@ static void register_commands(void)
         .argtable = NULL,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&test_cmd));
+
+    const esp_console_cmd_t print_cmd = {
+        .command  = "print",
+        .help     = "Print file content: print <path>",
+        .hint     = NULL,
+        .func     = &cmd_print_file,
+        .argtable = NULL,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&print_cmd));
+
+    const esp_console_cmd_t ls_cmd = {
+        .command  = "ls",
+        .help     = "List files in storage",
+        .hint     = NULL,
+        .func     = &cmd_ls,
+        .argtable = NULL,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ls_cmd));
+
+    const esp_console_cmd_t stats_cmd = {
+        .command  = "stats",
+        .help     = "Print timing stats for 'sensors' command",
+        .hint     = NULL,
+        .func     = &cmd_stats,
+        .argtable = NULL,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&stats_cmd));
 }
 
 // ===============================
@@ -215,5 +399,6 @@ void cmd_control_start(void)
         ESP_LOGE(TAG, "Failed to create console_task");
     } else {
         ESP_LOGI(TAG, "console_task started on core %d", CORE_ROBOT);
+        rt_stats_reset(&g_sensors_cmd_stats);
     }
 }

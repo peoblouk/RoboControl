@@ -7,7 +7,7 @@
 
 #define WIFI_SSID      "ESP32-RoboticArm"
 #define WIFI_PASS      "RoboticArm123"   
-#define MAX_STA_CONN   4                      // max stable connections
+#define MAX_STA_CONN   4 // max stable connections
 
 typedef struct {
     char ssid[32];
@@ -21,6 +21,9 @@ typedef struct {
 #include "esp_http_server.h"
 #include "driver/ledc.h"
 #include <string.h>
+#include <strings.h>
+#include <ctype.h>
+
 #include <stdlib.h>
 #include <inttypes.h>
 #include "esp_spiffs.h"

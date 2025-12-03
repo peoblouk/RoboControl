@@ -33,6 +33,7 @@ void app_main(void)
 
     wifi_servo_server_start(); // Start Wi-Fi and Servo Control Server
     robot_control_start();     // Start robot control task
+
     cmd_control_start();       // Start command control task
 
     //! UART for receiving commands from another ESP32

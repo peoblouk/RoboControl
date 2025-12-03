@@ -275,36 +275,45 @@ static void ws_task_sensors(void *arg) {
 // ===============================
 // FILE SYSTEM MANAGER (TXT + GCODE)
 // ===============================
-static int ascii_tolower_(int c){ return (c>='A' && c<='Z') ? (c+32) : c; }
-static int ascii_casecmp_(const char *a, const char *b){
-    for(;;){
-        int ca = ascii_tolower_(*a++);
-        int cb = ascii_tolower_(*b++);
-        if (ca != cb) return ca - cb;
-        if (cb == 0)  return 0;
-    }
-}
+
+// static int ascii_tolower_(int c){ return (c>='A' && c<='Z') ? (c+32) : c; }
+// static int ascii_casecmp_(const char *a, const char *b){
+//     for(;;){
+//         int ca = ascii_tolower_(*a++);
+//         int cb = ascii_tolower_(*b++);
+//         if (ca != cb) return ca - cb;
+//         if (cb == 0)  return 0;
+//     }
+// }
 
 static bool ext_allowed_(const char *name) {
     const char *dot = strrchr(name, '.');
     if (!dot) return false;
-    return ascii_casecmp_(dot, ".txt") == 0 || ascii_casecmp_(dot, ".gcode") == 0;
+    return (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".gcode") == 0);
 }
 
-static int  hex2int_(char c){
-    if (c>='0' && c<='9') return c-'0';
-    if (c>='A' && c<='F') return c-'A'+10;
-    if (c>='a' && c<='f') return c-'a'+10;
+static int hex2int_(char c){
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     return -1;
 }
+
 static void url_decode_(char *dst, const char *src){
-    size_t di=0;
-    for (size_t si=0; src[si]; ++si){
-        if (src[si]=='%' && src[si+1] && src[si+2]){
+    size_t di = 0;
+    for (size_t si = 0; src[si]; ++si) {
+        if (src[si] == '%' && src[si+1] && src[si+2]) {
             int hi = hex2int_(src[si+1]);
             int lo = hex2int_(src[si+2]);
-            if (hi>=0 && lo>=0){ dst[di++] = (char)((hi<<4)|lo); si+=2; continue; }
-        } else if (src[si]=='+'){ dst[di++]=' '; continue; }
+            if (hi >= 0 && lo >= 0) { 
+                dst[di++] = (char)((hi << 4) | lo); 
+                si += 2; 
+                continue; 
+            }
+        } else if (src[si] == '+') { 
+            dst[di++] = ' '; 
+            continue; 
+        }
         dst[di++] = src[si];
     }
     dst[di] = '\0';
@@ -318,28 +327,6 @@ static bool make_path_from_tail_(const char *uri_tail, char *out, size_t out_sz)
     if (!ext_allowed_(name)) return false;
     int n = snprintf(out, out_sz, "%s/%s", FM_BASE, name);
     return n>0 && (size_t)n<out_sz;
-}
-
-static void print_gcode_to_console(const char *filename)
-{
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        ESP_LOGE(TAG, "Cannot open file for reading: %s", filename);
-        return;
-    }
-
-    printf("\n=== G-CODE CONTENT ===\n");
-    char line[128];
-    int line_number = 1;
-
-    while (fgets(line, sizeof(line), file)) {
-        line[strcspn(line, "\r\n")] = 0;
-        printf("%4d: %s\n", line_number, line);
-        line_number++;
-    }
-
-    printf("=== END OF G-CODE ===\n\n");
-    fclose(file);
 }
 
 static esp_err_t files_list_handler(httpd_req_t *req) {
@@ -421,10 +408,6 @@ static esp_err_t file_any_handler(httpd_req_t *req) {
         fclose(f);
         httpd_resp_sendstr(req, "OK");
 
-        const char *ext = strrchr(path, '.');
-        if (ext && ((ascii_casecmp_(ext, ".gcode"))|| (ascii_casecmp_(ext, ".txt"))==0)) {
-            print_gcode_to_console(path);
-        }
         return ESP_OK;
     }
 
@@ -450,7 +433,6 @@ static esp_err_t upload_post_handler(httpd_req_t *req) {
     fclose(fd);
     ESP_LOGI(TAG, "G-code saved: %s", filepath);
     httpd_resp_sendstr(req, "File uploaded successfully!");
-    print_gcode_to_console(filepath);
     return ESP_OK;
 }
 
