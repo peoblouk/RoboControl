@@ -227,7 +227,7 @@ static int cmd_stats(int argc, char **argv) // stats
     }
 
     rt_stats_print("SENSORS_CMD", &g_sensors_cmd_stats);
-    rt_starts_print("SERVO_CMD", &g_servo_cmd_stats);
+    rt_stats_print("SERVO_CMD", &g_servo_cmd_stats);
     rt_stats_print("MOVE_CMD", &g_move_cmd_stats);
     return 0;
 }
@@ -312,7 +312,7 @@ static void console_task(void *arg)
     setvbuf(stdout, NULL, _IONBF, 0);
 
     esp_console_config_t console_cfg = {
-        .max_cmdline_args   = 8,
+        .max_cmdline_args   = 5,
         .max_cmdline_length = CMD_BUF_SIZE,
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
         .hint_color = 0,
