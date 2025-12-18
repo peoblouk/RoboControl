@@ -232,20 +232,55 @@ static int cmd_stats(int argc, char **argv) // stats
     return 0;
 }
 
+
 static int cmd_tasks(int argc, char **argv) // tasks
 {
     (void)argc;
     (void)argv;
 
-    const int n = uxTaskGetNumberOfTasks();
-    const int buf_len = n * 80; // rezerva na řádek/task
-    char *buf = malloc(buf_len);
-    if (!buf) return 0;
+    UBaseType_t num_tasks = uxTaskGetNumberOfTasks();
 
-    vTaskList(buf);
-    ESP_LOGI("TASKS", "\nName          State Prio Stack Num\n%s", buf);
+    TaskStatus_t *ts = malloc(num_tasks * sizeof(TaskStatus_t));
+    if (!ts) {
+        printf("ERR: malloc failed\n");
+        return 0;
+    }
 
-    free(buf);
+    uint32_t total_run_time = 0;
+    num_tasks = uxTaskGetSystemState(ts, num_tasks, &total_run_time);
+
+    printf("Name            State Prio Stack Core Num\n");
+
+    for (UBaseType_t i = 0; i < num_tasks; i++) {
+        char state_ch;
+        switch (ts[i].eCurrentState) {
+            case eRunning:   state_ch = 'R'; break;
+            case eReady:     state_ch = 'R'; break;
+            case eBlocked:   state_ch = 'B'; break;
+            case eSuspended: state_ch = 'S'; break;
+            case eDeleted:   state_ch = 'D'; break;
+            default:         state_ch = '?'; break;
+        }
+
+        BaseType_t core = xTaskGetAffinity(ts[i].xHandle);
+        const char *core_str;
+        if (core == 0 || core == 1) {
+            core_str = (core == 0) ? "0" : "1";
+        } 
+        else { 
+            core_str = "-"; // for unpinned
+        }
+
+        printf("%-15s %c     %2u   %5u   %3s  %3u\n",
+               ts[i].pcTaskName,
+               state_ch,
+               (unsigned)ts[i].uxCurrentPriority,
+               (unsigned)ts[i].usStackHighWaterMark,
+               core_str,
+               (unsigned)ts[i].xTaskNumber);
+    }
+
+    free(ts);
     return 0;
 }
 
