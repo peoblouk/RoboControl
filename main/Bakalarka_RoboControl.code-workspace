@@ -1,0 +1,53 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.c": "c",
+			"esp_http_server.h": "c",
+			"wifiserver.h": "c",
+			"gpio.h": "c",
+			"string.h": "c",
+			"sdkconfig.h": "c",
+			"esp_netif.h": "c",
+			"nvs_flash.h": "c",
+			"wifi_servo_server.h": "c",
+			"esp_spiffs.h": "c",
+			"format": "c",
+			"thread": "c",
+			"inttypes.h": "c",
+			"esp_log.h": "c",
+			"rmt.h": "c",
+			"esp_wifi.h": "c",
+			"nvs.h": "c",
+			"random": "c",
+			"ledc.h": "c",
+			"ledc_types.h": "c",
+			"esp_err.h": "c",
+			"esp_intr_alloc.h": "c",
+			"esp_event.h": "c",
+			"robot_io.h": "c",
+			"math.h": "c",
+			"esp_adc_cal.h": "c",
+			"adc.h": "c",
+			"cjson.h": "c",
+			"stdlib.h": "c",
+			"freertos.h": "c",
+			"esp_vfs_dev.h": "c",
+			"clk_tree_defs.h": "c",
+			"semphr.h": "c",
+			"uart.h": "c",
+			"task.h": "c",
+			"adc_types.h": "c",
+			"wifi_server.h": "c",
+			"uart_receive.h": "c",
+			"linenoise.h": "c",
+			"console.h": "c",
+			"stat.h": "c",
+			"dirent.h": "c"
+		}
+	}
+}

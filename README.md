@@ -128,7 +128,7 @@ main/
 - `/wifi_reset` — POST pro reset Wi‑Fi konfigurace (vymaže NVS a restartuje)
 
 <p align="center">
-  <img src="img/Web_interface.JPEG" alt="Web server interface" width="700"/>
+  <img src="img/Web_interface.png" alt="Web server interface" width="700"/>
 </p>
 
 ---
