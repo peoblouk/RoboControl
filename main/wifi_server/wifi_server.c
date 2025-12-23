@@ -86,7 +86,7 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t icon_get_handler(httpd_req_t *req) {
-    FILE *f = fopen("/spiffs/web/esp32_robotic_arm.ico", "rb");
+    FILE *f = fopen("/spiffs/web/robocontrol.ico", "rb");
     if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
 
     httpd_resp_set_type(req, "image/x-icon");
@@ -468,6 +468,28 @@ void erase_wifi_nvs(void) {
 }
 
 // ===============================
+// mDNS
+// =============================== 
+static void start_mdns(void)
+{
+    esp_err_t err = mdns_init();
+
+    if (err == ESP_ERR_INVALID_STATE) {
+        mdns_free();
+        ESP_ERROR_CHECK(mdns_init());
+    } else {
+        ESP_ERROR_CHECK(err);
+    }
+
+    ESP_ERROR_CHECK(mdns_hostname_set("robo-control"));
+    ESP_ERROR_CHECK(mdns_instance_name_set("ESP Robo Control"));
+
+    mdns_service_remove_all();
+    ESP_ERROR_CHECK(mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0));
+}
+
+
+// ===============================
 // WIFI SOFTAP INIT
 // ===============================
 void wifi_init_softap(void) {
@@ -493,6 +515,9 @@ void wifi_init_softap(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,&wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_ERROR_CHECK(esp_wifi_start());
+    start_mdns();
 }
 
 // ===============================
@@ -510,7 +535,7 @@ static httpd_handle_t start_webserver(void) {
         { "/status", HTTP_GET, status_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/settings", HTTP_GET, settings_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/web/style.css", HTTP_GET, style_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
-        { "/web/esp32_robotic_arm.ico", HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
+        { "/web/robocontrol.ico", HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
         { "/favicon.ico",               HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
         { "/wifi_reset", HTTP_POST, wifi_reset_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/wifi_config", HTTP_ANY, wifi_config_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },

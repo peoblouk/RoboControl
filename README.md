@@ -3,7 +3,7 @@
 # Ovládání modelu manipulátoru pomocí ESP32-S3
 
 <p align="right">
-  <img src="spiffs/web/esp32_robotic_arm.ico" alt="Web server interface" width="50"/>
+  <img src="spiffs/web/robocontrol.ico" alt="Web server interface" width="50"/>
 </p>
 Tento projekt je ukázka řízení 6DOF robotického ramene pomocí **ESP32-S3**.  
 Implementuje ovládání servomotorů, čtení senzorů a základní inverzní kinematiku.  
