@@ -9,8 +9,8 @@
 // ===============================
 static const char *TAG = "wifi_server";
 
-static const char *FM_BASE = "/spiffs/data";
-static const char *FILE_PREFIX = "/file/";
+static const char *FM_BASE = FILE_STORAGE_PATH;      // = FS_DATA_BASE
+static const char *FILE_PREFIX = HTTP_FILE_PREFIX;   // = "/file/"
 
 my_wifi_config_t wifi_cfg = {
     .ssid = WIFI_SSID,
@@ -28,7 +28,7 @@ static SemaphoreHandle_t g_ws_lock;
 // WEB SERVER HANDLERS (static files)
 // ===============================
 static esp_err_t style_get_handler(httpd_req_t *req) {
-    FILE* f = fopen("/spiffs/web/style.css", "r");
+    FILE* f = fopen(FS_WEB_BASE "/style.css", "r");
     if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "text/css");
     char buf[512];
@@ -41,7 +41,7 @@ static esp_err_t style_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t root_get_handler(httpd_req_t *req) {
-    FILE* f = fopen("/spiffs/web/spage.html", "r");
+    FILE* f = fopen(FS_WEB_BASE "/spage.html", "r");
     if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "text/html");
     char buf[512];
@@ -54,7 +54,7 @@ static esp_err_t root_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t settings_get_handler(httpd_req_t *req) {
-    FILE* f = fopen("/spiffs/web/settings.html", "r");
+    FILE* f = fopen(FS_WEB_BASE "/settings.html", "r");
     if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
     char buf[512];
     size_t r;
@@ -86,11 +86,11 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t icon_get_handler(httpd_req_t *req) {
-    FILE *f = fopen("/spiffs/web/robocontrol.ico", "rb");
+    FILE *f = fopen(FS_WEB_BASE "/robocontrol.ico", "rb");
     if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
 
     httpd_resp_set_type(req, "image/x-icon");
-    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=2592000"); // 30 dní cache
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=2592000"); // cache
 
     char buf[512];
     size_t r;
@@ -446,7 +446,7 @@ static esp_err_t file_any_handler(httpd_req_t *req) {
 }
 
 static esp_err_t upload_post_handler(httpd_req_t *req) {
-    char filepath[64];
+    char filepath[128];
     snprintf(filepath, sizeof(filepath), "%s/%s", FM_BASE, "gcode_file.gcode");
 
     FILE *fd = fopen(filepath, "wb");

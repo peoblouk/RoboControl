@@ -196,7 +196,7 @@ void servo_set_angle(int servo_id, float angle) {
     ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel);
 
-    ESP_LOGI(TAG, "Servo %d set to %.1f°", servo_id, angle);
+    //ESP_LOGI(TAG, "Servo %d set to %.1f°", servo_id, angle);
 }
 
 // ===============================

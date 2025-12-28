@@ -12,10 +12,9 @@
 #define CORE_ROBOT  1   // servos, sensors, control
 
 // Filepaths
-#define FS_DATA_BASE        "/spiffs/data"
-#define FS_WEB_BASE         "/spiffs/web"
-
-#define FILE_STORAGE_PATH   FS_DATA_BASE   // pro CLI + G-code + file manager data
+#define FS_DATA_BASE        "/spiffs/data" // Path for data files
+#define FS_WEB_BASE         "/spiffs/web" // Path for web files
+#define FILE_STORAGE_PATH   FS_DATA_BASE  // Path for file storage
 
 // ===============================
 // ROBOT IO CONFIGURATION  
