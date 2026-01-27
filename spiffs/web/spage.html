@@ -314,22 +314,25 @@
       </div>
     </div>
 
-    <div class="main-container">
+<div class="main-container">
       <div class="container">
         <h1>Move to XYZ</h1>
-        <div class="form-group">
-          <label for="x">X [mm]:</label>
-          <input type="number" id="x" step="1" value="100" />
+
+        <div class="container">
+          <div class="form-group">
+            <label for="x">X [mm]:</label>
+            <input type="number" id="x" step="1" value="100" />
+          </div>
+          <div class="form-group">
+            <label for="y">Y [mm]:</label>
+            <input type="number" id="y" step="1" value="50" />
+          </div>
+          <div class="form-group">
+            <label for="z">Z [mm]:</label>
+            <input type="number" id="z" step="1" value="100" />
+          </div>
+          <button onclick="moveXYZ()">Move</button>
         </div>
-        <div class="form-group">
-          <label for="y">Y [mm]:</label>
-          <input type="number" id="y" step="1" value="50" />
-        </div>
-        <div class="form-group">
-          <label for="z">Z [mm]:</label>
-          <input type="number" id="z" step="1" value="100" />
-        </div>
-        <button onclick="moveXYZ()">Move</button>
 
         <div class="container">
           <h2>Manual G-Code</h2>
@@ -343,7 +346,9 @@
             <button style="width: auto" onclick="sendGcodeLine()">Send</button>
           </div>
         </div>
+        
       </div>
+    </div>
 
       <div class="column">
         <div class="container">
