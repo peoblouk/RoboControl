@@ -1,6 +1,6 @@
 <!-- @format -->
 
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <link rel="stylesheet" href="web/style.css" />
@@ -11,28 +11,59 @@
 
     <script>
       let ws;
+      document.addEventListener("DOMContentLoaded", () => {
+        const gauges = document.querySelectorAll(".gauge");
+        gauges.forEach((g) => createGauge(g, g.dataset.id));
+      });
 
       function initWS() {
         ws = new WebSocket("ws://" + window.location.host + "/ws");
 
         ws.onopen = () => {
           console.log("WS connected");
-          document.querySelector(".status-dot").style.background = "limegreen";
-          document.querySelector(".status span").textContent = "Connected";
+          document.getElementById("wifi-dot").style.background = "#22c55e"; // Green
+          document.getElementById("wifi-state").textContent = "Connected";
+
+          ws.send(JSON.stringify({ cmd: "sensors" }));
         };
 
         ws.onmessage = (event) => {
           const data = JSON.parse(event.data);
 
-          // Realtime sensor updates
+          if (data.state) {
+            const elText = document.getElementById("robot-state");
+            const elDot = document.getElementById("robot-dot");
+
+            elText.textContent = data.state;
+
+            if (data.state === "IDLE") {
+              elDot.style.background = "#fbbf24"; // Orange
+            } else if (data.state === "RUNNING") {
+              elDot.style.background = "#22c55e"; // Green
+            } else if (data.state === "ALARM" || data.state === "ERROR") {
+              elDot.style.background = "#ef4444"; // Red
+            } else {
+              elDot.style.background = "gray";
+            }
+          }
+
           if (data.sensors) {
             const container = document.getElementById("sensor-values");
-            container.innerHTML = "";
-            data.sensors.forEach((sensor) => {
-              const div = document.createElement("div");
-              div.className = "sensor-value";
-              div.innerHTML = `<strong>Sensor ${sensor.id}:</strong> Angle: ${sensor.angle.toFixed(1)}°`;
-              container.appendChild(div);
+
+            if (container) {
+              container.innerHTML = "";
+            }
+
+            data.sensors.forEach((s) => {
+              const g = document.querySelector(`.gauge[data-id="${s.id}"]`);
+              if (g) updateGauge(g, s.angle);
+
+              if (container) {
+                const div = document.createElement("div");
+                div.className = "sensor-value";
+                div.innerHTML = `<strong>Sensor ${s.id}:</strong> Angle: ${s.angle.toFixed(1)}°`;
+                container.appendChild(div);
+              }
             });
           }
 
@@ -43,10 +74,59 @@
 
         ws.onclose = () => {
           console.log("WS disconnected, retrying...");
-          document.querySelector(".status-dot").style.background = "red";
-          document.querySelector(".status span").textContent = "Disconnected";
+
+          document.getElementById("wifi-dot").style.background = "#ef4444";
+          document.getElementById("wifi-state").textContent = "Disconnected";
+
+          document.getElementById("robot-dot").style.background = "#888";
+          document.getElementById("robot-state").textContent = "Offline";
+
           setTimeout(initWS, 2000);
         };
+      }
+
+      // Gauge
+      const GAUGE_MIN = 0;
+      const GAUGE_MAX = 180;
+      const TOLERANCE = 5;
+
+      function gaugeColor(angle) {
+        if (angle <= GAUGE_MIN + TOLERANCE || angle >= GAUGE_MAX - TOLERANCE) return "#ef4444";
+        if (angle < 20 || angle > 160) return "#f59e0b";
+        return "#22c55e";
+      }
+
+      function createGauge(el, id) {
+        el.innerHTML = `
+          <svg viewBox="0 0 100 50">
+            <path d="M10 50 A40 40 0 0 1 90 50"
+                  fill="none"
+                  stroke="#334155"
+                  stroke-width="8"/>
+            <path class="gauge-fill"
+                  d="M10 50 A40 40 0 0 1 90 50"
+                  fill="none"
+                  stroke="#22c55e"
+                  stroke-width="8"
+                  stroke-dasharray="126"
+                  stroke-dashoffset="126"/>
+          </svg>
+          <div class="gauge-value">--°</div>
+          <div class="gauge-label">Servo ${id}</div>
+        `;
+      }
+
+      function updateGauge(el, angle) {
+        const fill = el.querySelector(".gauge-fill");
+        const value = el.querySelector(".gauge-value");
+
+        const clamped = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, angle));
+        const percent = clamped / GAUGE_MAX;
+        const dash = 126 * (1 - percent);
+
+        fill.style.strokeDashoffset = dash;
+        fill.style.stroke = gaugeColor(clamped);
+        value.textContent = clamped.toFixed(1) + "°";
       }
 
       // Set servo angle
@@ -66,6 +146,20 @@
           return;
         }
         ws.send(JSON.stringify({ cmd: "move_xyz", x: x, y: y, z: z }));
+      }
+
+      // Send manual G-code line
+      function sendGcodeLine() {
+        const input = document.getElementById("gcode_input");
+        const line = input.value.trim();
+
+        if (!line) {
+          alert("Please enter a command");
+          return;
+        }
+
+        ws.send(JSON.stringify({ cmd: "gcode_line", line: line }));
+        input.value = "";
       }
 
       // File upload
@@ -95,10 +189,23 @@
       }
 
       // Load file list
+      function runFile(filename) {
+        if (!confirm(`Run program "${filename}"?`)) return;
+        ws.send(JSON.stringify({ cmd: "run_gcode", filename: filename }));
+        alert("Send.");
+      }
+
+      function stopRobot() {
+        ws.send(JSON.stringify({ cmd: "gcode_stop" }));
+
+        document.getElementById("robot-state").textContent = "STOPPED";
+        document.getElementById("robot-dot").style.background = "#ef4444";
+      }
+
       async function loadFiles() {
         const list = document.getElementById("files-body");
         if (!list) return;
-        list.innerHTML = `<tr><td colspan="4" style="padding:8px;">Loading…</td></tr>`;
+        list.innerHTML = `<tr><td colspan="5" style="padding:8px;">Loading…</td></tr>`;
 
         try {
           const res = await fetch("/files");
@@ -106,7 +213,7 @@
           const files = await res.json();
 
           if (!files.length) {
-            list.innerHTML = `<tr><td colspan="4" style="padding:8px;">No files found</td></tr>`;
+            list.innerHTML = `<tr><td colspan="5" style="padding:8px;">No files found</td></tr>`;
             return;
           }
 
@@ -115,21 +222,23 @@
             const tr = document.createElement("tr");
 
             tr.innerHTML = `
-              <td style="border-bottom:1px solid #eee; padding:6px 8px;">
-                <input class="file-chk" type="checkbox" value="${f.name}">
-              </td>
-              <td style="border-bottom:1px solid #eee; padding:6px 8px;">
-                <a href="/file/${encodeURIComponent(f.name)}" target="_blank">${f.name}</a>
-              </td>
-              <td style="border-bottom:1px solid #eee; padding:6px 8px; text-align:right;">${f.size}</td>
-              <td style="border-bottom:1px solid #eee; padding:6px 8px;">
-                <button data-del="${f.name}">Delete</button>
-              </td>
-            `;
+        <td style="border-bottom:1px solid #eee; padding:6px 8px;">
+          <input class="file-chk" type="checkbox" value="${f.name}">
+        </td>
+        <td style="border-bottom:1px solid #eee; padding:6px 8px;">
+          <a href="/file/${encodeURIComponent(f.name)}" target="_blank">${f.name}</a>
+        </td>
+        <td style="border-bottom:1px solid #eee; padding:6px 8px; text-align:right;">${f.size} B</td>
+        <td style="border-bottom:1px solid #eee; padding:6px 8px; text-align:center;">
+           <button style="background: #22c55e; width: auto; padding: 5px 10px;" onclick="runFile('${f.name}')">▶ Run</button>
+        </td>
+        <td style="border-bottom:1px solid #eee; padding:6px 8px;">
+          <button style="background: #ef4444; width: auto; padding: 5px 10px;" data-del="${f.name}">Delete</button>
+        </td>
+      `;
             list.appendChild(tr);
           }
 
-          // Actions
           document.querySelectorAll("button[data-del]").forEach((btn) => {
             btn.onclick = async () => {
               const name = btn.getAttribute("data-del");
@@ -143,7 +252,7 @@
             };
           });
         } catch (e) {
-          list.innerHTML = `<tr><td colspan="4" style="padding:8px;">Error: ${e}</td></tr>`;
+          list.innerHTML = `<tr><td colspan="5" style="padding:8px;">Error: ${e}</td></tr>`;
         }
       }
 
@@ -171,16 +280,40 @@
   </head>
 
   <body>
-    <!-- Navbar -->
     <div class="navbar">
       <h2><a href="/" style="text-decoration: none; color: white">RoboControl</a></h2>
-      <div class="status">
-        <div class="status-dot"></div>
-        <span>Disconnected</span>
+
+      <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap; justify-content: center">
+        <button
+          onclick="stopRobot()"
+          style="
+            background: #dc2626;
+            color: white;
+            font-weight: bold;
+            padding: 5px 15px;
+            border: 2px solid #b91c1c;
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+          "
+        >
+          STOP
+        </button>
+
+        <div class="status">
+          <span style="opacity: 0.7; font-size: 0.8em; margin-right: 5px">ROBOT:</span>
+          <div class="status-dot" id="robot-dot" style="background: #888"></div>
+          <span id="robot-state">Unknown</span>
+        </div>
+
+        <div class="status">
+          <span style="opacity: 0.7; font-size: 0.8em; margin-right: 5px">WIFI:</span>
+          <div class="status-dot" id="wifi-dot" style="background: #ef4444"></div>
+          <span id="wifi-state">Disconnected</span>
+        </div>
       </div>
     </div>
 
-    <!-- Move to XYZ -->
     <div class="main-container">
       <div class="container">
         <h1>Move to XYZ</h1>
@@ -197,14 +330,25 @@
           <input type="number" id="z" step="1" value="100" />
         </div>
         <button onclick="moveXYZ()">Move</button>
+
+        <div class="container">
+          <h2>Manual G-Code</h2>
+          <div class="form-group" style="display: flex; gap: 10px">
+            <input
+              type="text"
+              id="gcode_input"
+              placeholder="e.g. G1 X100 Y50"
+              onkeydown="if (event.key === 'Enter') sendGcodeLine();"
+            />
+            <button style="width: auto" onclick="sendGcodeLine()">Send</button>
+          </div>
+        </div>
       </div>
 
-      <!-- Servo Control -->
       <div class="column">
         <div class="container">
           <h1>Servo Control - joint space</h1>
           <div id="servo-controls">
-            <!-- Servo sliders -->
             <div class="servo-control">
               <label>Servo GPIO_NUM_35:</label>
               <input
@@ -292,34 +436,36 @@
         </div>
       </div>
 
-      <!-- Sensors -->
       <div class="column">
         <div class="container">
-          <h2>Sensor Values</h2>
-          <div id="sensor-values" class="sensor-container">
-            <p>Waiting for data...</p>
+          <h2>Joint Angles</h2>
+          <div class="gauges">
+            <div class="gauge" data-id="0"></div>
+            <div class="gauge" data-id="1"></div>
+            <div class="gauge" data-id="2"></div>
+            <div class="gauge" data-id="3"></div>
+            <div class="gauge" data-id="4"></div>
+            <div class="gauge" data-id="5"></div>
           </div>
         </div>
 
-        <!-- ===== Upload + Files ===== -->
         <div class="container">
           <h2>Files (.txt, .gcode)</h2>
 
-          <!-- Upload controls -->
           <div class="upload-container" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
             <input type="file" id="fileInput" accept=".txt,.gcode" />
             <button onclick="uploadFile()">Upload</button>
           </div>
 
-          <!-- Files table -->
           <div style="overflow: auto; margin-top: 10px">
             <table style="width: 100%; border-collapse: collapse">
               <thead>
                 <tr>
                   <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 40px">☐</th>
                   <th style="border-bottom: 1px solid #fff; padding: 6px 8px">Name</th>
-                  <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 120px">Size [B]</th>
-                  <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 120px">Actions</th>
+                  <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 100px">Size</th>
+                  <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 80px">Run</th>
+                  <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 80px">Delete</th>
                 </tr>
               </thead>
               <tbody id="files-body">
@@ -332,13 +478,11 @@
           <button onclick="deleteSelected()">Delete selected</button>
         </div>
 
-        <!-- WiFi Configuration -->
         <div class="container">
           <h2>WiFi Configuration</h2>
-          <button onclick="window.location.href='/settings'">WiFi Configuration</button>
+          <button onclick="window.location.href = '/settings'">WiFi Configuration</button>
         </div>
 
-        <!-- Footer -->
         <div class="footer">
           <p>RoboControl Petr Oblouk © 2025</p>
         </div>

@@ -93,11 +93,11 @@ static int cmd_gcode(int argc, char **argv) // gcode <subcommand>
     if (strcmp(argv[1],"reset")==0) { gcode_reset(); return 0; }
     if (strcmp(argv[1],"stop")==0)  { gcode_stop();  return 0; }
 
-    if (strcmp(argv[1],"run")==0 && argc >= 3) {
-        bool ok = gcode_run_file(argv[2]);
-        printf(ok ? "OK\n" : "ERR\n");
-        return 0;
-    }
+    if (strcmp(argv[1], "run") == 0 && argc >= 3) {
+            robot_core_run_gcode(argv[2]);
+            printf("G-Code execution started in background.\n");
+            return 0;
+        }
 
     if (strcmp(argv[1],"line")==0 && argc >= 3) {
         char line[200] = {0};

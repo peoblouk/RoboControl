@@ -42,11 +42,11 @@
 #define L5  10.0f   // length of end-effector
 
 // Executor (real-time)
-#define EXEC_DT_MS           20        // 50 Hz (serva většinou v pohodě)
-#define MIN_SEG_T_S          0.05f     // minimální čas segmentu, aby to necukalo
+#define EXEC_DT_MS           20        // 50 Hz 
+#define MIN_SEG_T_S          0.05f     // minimum segment time in seconds
 
 // Planner / queue
-#define SEG_BUF_LEN          32        // kolik segmentů dopředu (ring buffer)
+#define SEG_BUF_LEN          32        // trajectory segment buffer length
 #define ROBOT_CMD_QUEUE_LEN  32        // FreeRTOS queue length pro robot_cmd_t
 
 

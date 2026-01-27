@@ -247,6 +247,7 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             }
         }
 
+        // GCODE LINE (Manual commands)
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"gcode_line") == 0) {
             cJSON *jl = cJSON_GetObjectItem(json, "line");
             int fd = httpd_req_to_sockfd(req);
@@ -258,20 +259,19 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             }
         }
 
-        // GCODE: run file from /spiffs/data
-        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"gcode_run") == 0) {
-            cJSON *jf = cJSON_GetObjectItem(json, "file");
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "run_gcode") == 0) {
+            cJSON *jf = cJSON_GetObjectItem(json, "filename");
             int fd = httpd_req_to_sockfd(req);
 
             if (cJSON_IsString(jf)) {
-                // MVP: spustí to blokující – lepší je task (viz níž)
-                bool ok = gcode_run_file(jf->valuestring);
-                ws_send_to(fd, ok ? "{\"status\":\"ok\",\"cmd\":\"gcode_run\"}"
-                                : "{\"status\":\"err\",\"cmd\":\"gcode_run\"}");
+                robot_core_run_gcode(jf->valuestring);
+                ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"run_gcode\",\"state\":\"started\"}");
+            } else {
+                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"run_gcode\",\"msg\":\"no_filename\"}");
             }
         }
 
-        // GCODE: stop
+        // GCODE STOP
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"gcode_stop") == 0) {
             int fd = httpd_req_to_sockfd(req);
             gcode_stop();
@@ -306,16 +306,6 @@ static void ws_task_sensors(void *arg) {
 // ===============================
 // FILE SYSTEM MANAGER (TXT + GCODE)
 // ===============================
-
-// static int ascii_tolower_(int c){ return (c>='A' && c<='Z') ? (c+32) : c; }
-// static int ascii_casecmp_(const char *a, const char *b){
-//     for(;;){
-//         int ca = ascii_tolower_(*a++);
-//         int cb = ascii_tolower_(*b++);
-//         if (ca != cb) return ca - cb;
-//         if (cb == 0)  return 0;
-//     }
-// }
 
 static bool ext_allowed_(const char *name) {
     const char *dot = strrchr(name, '.');

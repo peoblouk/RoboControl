@@ -72,14 +72,14 @@ void rt_span_start(int64_t *t_start_us)
     *t_start_us = esp_timer_get_time();
 }
 
-// Vrátí dobu trvání úseku v µs
+// Returns time span since t_start_us
 int64_t rt_span_end(int64_t t_start_us)
 {
     int64_t now = esp_timer_get_time();
     return now - t_start_us;
 }
 
-// Měření periody loopu / tasku
+// Mearks time since last call and adds to stats
 void rt_loop_mark(rt_stats_t *stats, int64_t *last_timestamp_us)
 {
     int64_t now = esp_timer_get_time();

@@ -15,6 +15,8 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include <stdbool.h>
+#include "gcode.h" // G-code interpreter
+
 
 // Radians / Degrees conversion
 #define RAD2DEG(x) ((x) * 180.0f / M_PI)
@@ -90,5 +92,7 @@ bool robot_cmd_move_xyz(float x, float y, float z);
 
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout);
 void robot_cmd_queue_flush(void);
+
+void robot_core_run_gcode(const char *filename);
 
 #endif // ROBOT_IO

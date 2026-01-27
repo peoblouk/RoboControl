@@ -28,6 +28,10 @@ sensor_t sensors[SENSOR_COUNT] = {
     //{ .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_7 },  // IO18 (reservation)
 };
 
+typedef struct {
+    char filename[64];
+} gcode_task_params_t;
+
 // Queue for robot commands
 static QueueHandle_t s_robot_queue = NULL;
 
@@ -356,7 +360,7 @@ static void robot_control_task(void *arg)
 // ===============================
 void robot_control_start(void)
 {
-    // Fronta na max 8 příkazů
+    // Create command queue
     s_robot_queue = xQueueCreate(8, sizeof(robot_cmd_t));
     if (s_robot_queue == NULL) {
         ESP_LOGE(TAG, "Failed to create robot queue");
@@ -429,4 +433,49 @@ void robot_cmd_queue_flush(void)
     robot_cmd_t cmd = {0};
     cmd.type = ROBOT_CMD_QUEUE_FLUSH;
     (void)xQueueSend(s_robot_queue, &cmd, 0);
+}
+
+// ===============================
+// RUN GCODE FILE
+// ===============================
+static void gcode_executor_task(void *arg)
+{
+    gcode_task_params_t *params = (gcode_task_params_t *)arg;
+
+    ESP_LOGI(TAG, "Starting G-Code task for file: %s", params->filename);
+    bool res = gcode_run_file(params->filename);
+
+    if (res) {
+        ESP_LOGI(TAG, "G-Code finished successfully");
+    } else {
+        ESP_LOGE(TAG, "G-Code failed");
+    }
+
+    free(params);
+    vTaskDelete(NULL);
+}
+
+void robot_core_run_gcode(const char *filename)
+{
+    gcode_task_params_t *params = malloc(sizeof(gcode_task_params_t));
+    if (params) {
+        strncpy(params->filename, filename, 64);
+        
+        BaseType_t res = xTaskCreatePinnedToCore(
+            gcode_executor_task, 
+            "gcode_exec", 
+            4096, 
+            params, 
+            4, 
+            NULL, 
+            CORE_ROBOT
+        );
+
+        if (res != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create G-code task");
+            free(params);
+        }
+    } else {
+        ESP_LOGE(TAG, "Failed to allocate memory for G-code task");
+    }
 }
