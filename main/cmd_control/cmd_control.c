@@ -22,18 +22,26 @@ static int cmd_servo(int argc, char **argv) // servo <id> <angle>
     int   id    = atoi(argv[1]);
     float angle = strtof(argv[2], NULL);
 
-    // start measuring
+    if (id < 0 || id >= SERVO_COUNT) {
+        printf("ERR: invalid id\n");
+        return 0;
+    }
+
+    if (angle < g_joint_limits[id].min_deg || angle > g_joint_limits[id].max_deg) {
+        printf("ERR: angle out of range (allowed %.1f - %.1f)\n",
+               g_joint_limits[id].min_deg, g_joint_limits[id].max_deg);
+        return 0;
+    }
+
     int64_t t_start_us = esp_timer_get_time();
     servo_set_angle(id, angle);
-
-    // end measuring 
     int64_t t_end_us = esp_timer_get_time();
-    int64_t dt_us    = t_end_us - t_start_us;
+
+    int64_t dt_us = t_end_us - t_start_us;
     rt_stats_add_sample(&g_servo_cmd_stats, dt_us);
 
     #ifdef STATS_PRINT
     printf("OK: Servo %d -> %.1f° (time: %lld us)\n", id, angle, (long long)dt_us);
-
     if (g_servo_cmd_stats.count % 10 == 0) {
         rt_stats_print("SERVO_CMD", &g_servo_cmd_stats);
     }

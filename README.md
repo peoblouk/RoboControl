@@ -155,6 +155,6 @@ Ovládání v prohlížeči:
 - HTTP /files returns: [{"name":"test.gcode","size":123},...]
 
 ---
-
-| GENEROVANO AI |
-
+<p align="center">
+  <img src="img/PCB_realization.png" alt="PCB realization" width="700"/>
+</p>

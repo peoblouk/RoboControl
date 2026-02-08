@@ -33,6 +33,26 @@ typedef struct {
 extern servo_t servos[SERVO_COUNT];
 
 // ===============================
+// JOINT LIMITS (per-axis safety)
+// ===============================
+typedef struct {
+    float min_deg;     // mechanical minimum angle
+    float max_deg;     // mechanical maximum angle
+    float max_deg_s;   // max joint speed (deg/s) for planning
+} joint_limits_t;
+
+extern const joint_limits_t g_joint_limits[SERVO_COUNT];
+
+// Validate/clamp helper for joint angles
+bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp);
+
+// XYZ workspace / reachability check before IK
+bool robot_xyz_reachable(float x, float y, float z);
+
+// Compute minimum safe duration from max joint speed limits
+float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_COUNT]);
+
+// ===============================
 //  SENSOR CONFIGURATION (ADC input)
 // ===============================
 typedef struct {

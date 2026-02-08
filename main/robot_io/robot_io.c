@@ -9,23 +9,32 @@ static adc_oneshot_unit_handle_t s_adc1 = NULL;
 static adc_oneshot_unit_handle_t s_adc2 = NULL;
 
 servo_t servos[SERVO_COUNT] = {
-    { .gpio_num = GPIO_NUM_35,  .channel = LEDC_CHANNEL_0 },
-    { .gpio_num = GPIO_NUM_36,  .channel = LEDC_CHANNEL_1 },
-    { .gpio_num = GPIO_NUM_37,  .channel = LEDC_CHANNEL_2 },
-    { .gpio_num = GPIO_NUM_39,  .channel = LEDC_CHANNEL_3 },
-    { .gpio_num = GPIO_NUM_40, .channel = LEDC_CHANNEL_4 },
-    { .gpio_num = GPIO_NUM_41, .channel = LEDC_CHANNEL_5 },
+    { .gpio_num = SERVO0_GPIO, .channel = SERVO0_CH },
+    { .gpio_num = SERVO1_GPIO, .channel = SERVO1_CH },
+    { .gpio_num = SERVO2_GPIO, .channel = SERVO2_CH },
+    { .gpio_num = SERVO3_GPIO, .channel = SERVO3_CH },
+    { .gpio_num = SERVO4_GPIO, .channel = SERVO4_CH },
+    { .gpio_num = SERVO5_GPIO, .channel = SERVO5_CH },
     //{ .gpio_num = GPIO_NUM_42, .channel = LEDC_CHANNEL_6 }, (manipulator)
 };
 
 sensor_t sensors[SENSOR_COUNT] = {
-    { .unit = ADC_UNIT_1, .channel = ADC_CHANNEL_3 },  // IO4
-    { .unit = ADC_UNIT_1, .channel = ADC_CHANNEL_4 },  // IO5
-    { .unit = ADC_UNIT_1, .channel = ADC_CHANNEL_5 },  // IO6
-    { .unit = ADC_UNIT_1, .channel = ADC_CHANNEL_6 },  // IO7
-    { .unit = ADC_UNIT_1, .channel = ADC_CHANNEL_7 },  // IO12
-    { .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_6 },  // IO17
+    { .unit = S0_ADC_UNIT, .channel = S0_ADC_CH },
+    { .unit = S1_ADC_UNIT, .channel = S1_ADC_CH },
+    { .unit = S2_ADC_UNIT, .channel = S2_ADC_CH },
+    { .unit = S3_ADC_UNIT, .channel = S3_ADC_CH },
+    { .unit = S4_ADC_UNIT, .channel = S4_ADC_CH },
+    { .unit = S5_ADC_UNIT, .channel = S5_ADC_CH },
     //{ .unit = ADC_UNIT_2, .channel = ADC_CHANNEL_7 },  // IO18 (reservation)
+};
+
+const joint_limits_t g_joint_limits[SERVO_COUNT] = {
+    { .min_deg = J0_MIN, .max_deg = J0_MAX, .max_deg_s = J0_V },
+    { .min_deg = J1_MIN, .max_deg = J1_MAX, .max_deg_s = J1_V },
+    { .min_deg = J2_MIN, .max_deg = J2_MAX, .max_deg_s = J2_V },
+    { .min_deg = J3_MIN, .max_deg = J3_MAX, .max_deg_s = J3_V },
+    { .min_deg = J4_MIN, .max_deg = J4_MAX, .max_deg_s = J4_V },
+    { .min_deg = J5_MIN, .max_deg = J5_MAX, .max_deg_s = J5_V },
 };
 
 typedef struct {
@@ -74,6 +83,53 @@ void servos_init(void)
     {
         ESP_LOGE(TAG, "Servo and sensor count mismatch");
     }
+}
+
+// ===============================
+// HELPER FUNCTIONS
+// ===============================
+
+static inline float clampf(float v, float lo, float hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
+{
+    bool ok = true;
+    for (int i = 0; i < SERVO_COUNT; i++) {
+        float lo = g_joint_limits[i].min_deg;
+        float hi = g_joint_limits[i].max_deg;
+        if (q[i] < lo || q[i] > hi) ok = false;
+        if (clamp) q[i] = clampf(q[i], lo, hi);
+    }
+    return ok;
+}
+
+bool robot_xyz_reachable(float x, float y, float z)
+{
+    float R = sqrtf(x*x + y*y);
+    float d = sqrtf(R*R + z*z);
+
+    if (d > (L1 + L2)) return false;
+    if (d < fabsf(L1 - L2)) return false;
+
+    return true;
+}
+
+float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_COUNT])
+{
+    float Tmin = 0.0f;
+    for (int i = 0; i < SERVO_COUNT; i++) {
+        float diff = fabsf(q1[i] - q0[i]);
+        float v = g_joint_limits[i].max_deg_s;
+        if (v > 1e-6f) {
+            float t = diff / v;
+            if (t > Tmin) Tmin = t;
+        }
+    }
+    return Tmin;
 }
 
 // ===============================
@@ -189,18 +245,16 @@ void servo_set_angle(int servo_id, float angle) {
         return;
     }
 
-    if (angle < 0) angle = 0;
-    if (angle > 180) angle = 180;
+    angle = clampf(angle,
+                   g_joint_limits[servo_id].min_deg,
+                   g_joint_limits[servo_id].max_deg);
 
-    // Angle to duty cycle (14bit = 0–16383)
-    uint32_t duty_min = (uint32_t)(0.5f / 20.0f * 16384);  // 0.5 ms 
-    uint32_t duty_max = (uint32_t)(2.5f / 20.0f * 16384);  // 2.5 ms
+    uint32_t duty_min = (uint32_t)(0.5f / 20.0f * 16384);
+    uint32_t duty_max = (uint32_t)(2.5f / 20.0f * 16384);
     uint32_t duty = duty_min + ((duty_max - duty_min) * angle) / 180;
 
     ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel);
-
-    //ESP_LOGI(TAG, "Servo %d set to %.1f°", servo_id, angle);
 }
 
 // ===============================
@@ -265,8 +319,6 @@ static bool seg_pop(traj_seg_t *s) {
     return true;
 }
 
-
-
 static float smoothstep(float s) { // 0..1
     if (s < 0) s = 0;
     if (s > 1) s = 1;
@@ -278,11 +330,16 @@ static void apply_joints(const float q[SERVO_COUNT]) {
 }
 
 // ===============================
-// ROBOT CONTROL TASK   
+// ROBOT CONTROL TASK
 // ===============================
 static void robot_control_task(void *arg)
 {
-    for (int i = 0; i < SERVO_COUNT; i++) s_last_q[i] = sensor_read_angle(i); // inicialization of last_q
+    for (int i = 0; i < SERVO_COUNT; i++) {
+        float a = sensor_read_angle(i);
+        if (a < 0) a = 90.0f;
+        a = clampf(a, g_joint_limits[i].min_deg, g_joint_limits[i].max_deg);
+        s_last_q[i] = a;
+    }
 
     robot_cmd_t cmd;
 
@@ -305,16 +362,22 @@ static void robot_control_task(void *arg)
             for (int i = 0; i < SERVO_COUNT; i++) s.q0[i] = s_last_q[i];
 
             if (cmd.type == ROBOT_CMD_MOVE_JOINTS) {
-                // default time: 1.0s (same as before 50*20ms)
                 for (int i = 0; i < SERVO_COUNT; i++) s.q1[i] = cmd.q_target[i];
+                robot_validate_and_prepare_q(s.q1, true);
                 s.T = 1.0f;
             }
             else if (cmd.type == ROBOT_CMD_MOVE_XYZ) {
+                if (!robot_xyz_reachable(cmd.x, cmd.y, cmd.z)) {
+                    ESP_LOGW(TAG, "XYZ out of reach: x=%.1f y=%.1f z=%.1f", cmd.x, cmd.y, cmd.z);
+                    continue;
+                }
                 inverse_kinematics(cmd.x, cmd.y, cmd.z, s.q1);
+                robot_validate_and_prepare_q(s.q1, true);
                 s.T = 1.0f;
             }
             else if (cmd.type == ROBOT_CMD_MOVE_JOINTS_T) {
                 for (int i = 0; i < SERVO_COUNT; i++) s.q1[i] = cmd.q_target[i];
+                robot_validate_and_prepare_q(s.q1, true);
                 s.T = cmd.duration_s;
             }
             else {
@@ -322,7 +385,10 @@ static void robot_control_task(void *arg)
                 continue;
             }
 
+            float Tmin = robot_min_time_for_move(s.q0, s.q1);
+            if (s.T < Tmin) s.T = Tmin;
             if (s.T < MIN_SEG_T) s.T = MIN_SEG_T;
+
             s.t = 0;
             s.active = false;
 
@@ -460,14 +526,14 @@ void robot_core_run_gcode(const char *filename)
     gcode_task_params_t *params = malloc(sizeof(gcode_task_params_t));
     if (params) {
         strncpy(params->filename, filename, 64);
-        
+
         BaseType_t res = xTaskCreatePinnedToCore(
-            gcode_executor_task, 
-            "gcode_exec", 
-            4096, 
-            params, 
-            4, 
-            NULL, 
+            gcode_executor_task,
+            "gcode_exec",
+            4096,
+            params,
+            4,
+            NULL,
             CORE_ROBOT
         );
 
