@@ -9,13 +9,13 @@ static adc_oneshot_unit_handle_t s_adc1 = NULL;
 static adc_oneshot_unit_handle_t s_adc2 = NULL;
 
 servo_t servos[SERVO_COUNT] = {
-    { .gpio_num = SERVO0_GPIO, .channel = SERVO0_CH },
-    { .gpio_num = SERVO1_GPIO, .channel = SERVO1_CH },
-    { .gpio_num = SERVO2_GPIO, .channel = SERVO2_CH },
-    { .gpio_num = SERVO3_GPIO, .channel = SERVO3_CH },
-    { .gpio_num = SERVO4_GPIO, .channel = SERVO4_CH },
-    { .gpio_num = SERVO5_GPIO, .channel = SERVO5_CH },
-    //{ .gpio_num = GPIO_NUM_42, .channel = LEDC_CHANNEL_6 }, (manipulator)
+    { .gpio_num = SERVO0_GPIO, .channel = SERVO0_CH }, // J0
+    { .gpio_num = SERVO1_GPIO, .channel = SERVO1_CH }, // J1_A
+    { .gpio_num = SERVO2_GPIO, .channel = SERVO2_CH }, // J1_B (follower)
+    { .gpio_num = SERVO3_GPIO, .channel = SERVO3_CH }, // J2
+    { .gpio_num = SERVO4_GPIO, .channel = SERVO4_CH }, // J3
+    { .gpio_num = SERVO5_GPIO, .channel = SERVO5_CH }, // J4
+    { .gpio_num = SERVO6_GPIO, .channel = SERVO6_CH }, // J5 (gripper)
 };
 
 sensor_t sensors[SENSOR_COUNT] = {
@@ -35,6 +35,7 @@ const joint_limits_t g_joint_limits[SERVO_COUNT] = {
     { .min_deg = J3_MIN, .max_deg = J3_MAX, .max_deg_s = J3_V },
     { .min_deg = J4_MIN, .max_deg = J4_MAX, .max_deg_s = J4_V },
     { .min_deg = J5_MIN, .max_deg = J5_MAX, .max_deg_s = J5_V },
+    { .min_deg = J6_MIN, .max_deg = J6_MAX, .max_deg_s = J6_V },
 };
 
 typedef struct {
@@ -64,8 +65,8 @@ void servos_init(void)
     };
     ESP_ERROR_CHECK(ledc_timer_config(&timer));
 
-    if (SENSOR_COUNT == SERVO_COUNT) {
-        for (int i = 0; i < SENSOR_COUNT; i++) {
+    // if (SENSOR_COUNT == SERVO_COUNT) {
+        for (int i = 0; i < SERVO_COUNT; i++) {
             ledc_channel_config_t channel = {
                 .gpio_num   = servos[i].gpio_num,
                 .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -78,11 +79,11 @@ void servos_init(void)
             ESP_ERROR_CHECK(ledc_channel_config(&channel));
         }
         ESP_LOGI(TAG, "Servos initialized");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Servo and sensor count mismatch");
-    }
+    // }
+    // else
+    // {
+    //     ESP_LOGE(TAG, "Servo and sensor count mismatch");
+    // }
 }
 
 // ===============================
@@ -245,16 +246,39 @@ void servo_set_angle(int servo_id, float angle) {
         return;
     }
 
-    angle = clampf(angle,
-                   g_joint_limits[servo_id].min_deg,
-                   g_joint_limits[servo_id].max_deg);
+    #define J1_A 1 // master
+    #define J1_B 2 // follower
 
-    uint32_t duty_min = (uint32_t)(0.5f / 20.0f * 16384);
-    uint32_t duty_max = (uint32_t)(2.5f / 20.0f * 16384);
+    int other = -1;
+    if (servo_id == J1_A) other = J1_B;
+    else if (servo_id == J1_B) other = J1_A;
+
+    float lo = g_joint_limits[servo_id].min_deg;
+    float hi = g_joint_limits[servo_id].max_deg;
+
+    if (other >= 0) {
+        if (g_joint_limits[other].min_deg > lo) lo = g_joint_limits[other].min_deg;
+        if (g_joint_limits[other].max_deg < hi) hi = g_joint_limits[other].max_deg;
+    }
+
+    angle = clampf(angle, lo, hi);
+
+    // uint32_t duty_min = (uint32_t)(0.5f / 20.0f * 16384);
+    // uint32_t duty_max = (uint32_t)(2.5f / 20.0f * 16384);
+
+    uint32_t duty_min = (uint32_t)(1.0f / 20.0f * 16384);
+    uint32_t duty_max = (uint32_t)(2.0f / 20.0f * 16384);
+
     uint32_t duty = duty_min + ((duty_max - duty_min) * angle) / 180;
 
     ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel);
+
+    // master - follower
+    if (other >= 0) {
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[other].channel, duty);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[other].channel);
+    }
 }
 
 // ===============================
@@ -335,7 +359,7 @@ static void apply_joints(const float q[SERVO_COUNT]) {
 static void robot_control_task(void *arg)
 {
     for (int i = 0; i < SERVO_COUNT; i++) {
-        float a = sensor_read_angle(i);
+        float a = (i < SENSOR_COUNT) ? sensor_read_angle(i) : 90.0f;
         if (a < 0) a = 90.0f;
         a = clampf(a, g_joint_limits[i].min_deg, g_joint_limits[i].max_deg);
         s_last_q[i] = a;

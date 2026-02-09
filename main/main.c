@@ -12,6 +12,7 @@
 #include "cmd_control.h"    // Command Control
 #include "rt_stats.h"       // Real-time statistics
 
+void test_gpio39_blink(void);
 
 static void init_spiffs(void); // Initialize SPIFFS (File System)
 
@@ -32,6 +33,11 @@ void app_main(void)
     robot_control_start();     // Start robot control task
 
     cmd_control_start();       // Start command control task
+
+    // while (1) {
+    //     test_gpio39_blink(); // Blink GPIO39 for testing
+    //     vTaskDelay(pdMS_TO_TICKS(1000));
+    // }
 }
 
 // ===============================
@@ -60,4 +66,23 @@ static void init_spiffs(void) {
     size_t total = 0, used = 0;
     esp_spiffs_info(NULL, &total, &used);
     ESP_LOGI("SPIFFS", "Partition size: total: %d, used: %d", total, used);
+}
+
+void test_gpio39_blink(void)
+{
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << GPIO_NUM_39,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = 0,
+        .pull_down_en = 0,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io);
+
+    while (1) {
+        gpio_set_level(GPIO_NUM_39, 1);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        gpio_set_level(GPIO_NUM_39, 0);
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
 }

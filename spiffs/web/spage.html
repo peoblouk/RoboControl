@@ -350,96 +350,104 @@
       </div>
     </div>
 
-      <div class="column">
-        <div class="container">
-          <h1>Servo Control - joint space</h1>
-          <div id="servo-controls">
-            <div class="servo-control">
-              <label>Servo GPIO_NUM_35:</label>
-              <input
-                type="range"
-                min="0"
-                max="180"
-                value="90"
-                id="servo-0"
-                oninput="document.getElementById('servo-value-0').textContent = this.value + '°'"
-              />
-              <span id="servo-value-0">90°</span>
-              <button onclick="setServo(0)">Set</button>
-            </div>
+  <div class="column">
+    <div class="container">
+      <h1>Servo Control - joint space (with limits)</h1>
 
-            <div class="servo-control">
-              <label>Servo GPIO_NUM_36:</label>
-              <input
-                type="range"
-                min="0"
-                max="180"
-                value="90"
-                id="servo-1"
-                oninput="document.getElementById('servo-value-1').textContent = this.value + '°'"
-              />
-              <span id="servo-value-1">90°</span>
-              <button onclick="setServo(1)">Set</button>
-            </div>
+      <div id="servo-controls">
 
-            <div class="servo-control">
-              <label>Servo GPIO_NUM_37:</label>
-              <input
-                type="range"
-                min="0"
-                max="180"
-                value="90"
-                id="servo-2"
-                oninput="document.getElementById('servo-value-2').textContent = this.value + '°'"
-              />
-              <span id="servo-value-2">90°</span>
-              <button onclick="setServo(2)">Set</button>
-            </div>
-
-            <div class="servo-control">
-              <label>Servo GPIO_NUM_39:</label>
-              <input
-                type="range"
-                min="0"
-                max="180"
-                value="90"
-                id="servo-3"
-                oninput="document.getElementById('servo-value-3').textContent = this.value + '°'"
-              />
-              <span id="servo-value-3">90°</span>
-              <button onclick="setServo(3)">Set</button>
-            </div>
-
-            <div class="servo-control">
-              <label>Servo GPIO_NUM_40:</label>
-              <input
-                type="range"
-                min="0"
-                max="180"
-                value="90"
-                id="servo-4"
-                oninput="document.getElementById('servo-value-4').textContent = this.value + '°'"
-              />
-              <span id="servo-value-4">90°</span>
-              <button onclick="setServo(4)">Set</button>
-            </div>
-
-            <div class="servo-control">
-              <label>Servo GPIO_NUM_41:</label>
-              <input
-                type="range"
-                min="0"
-                max="180"
-                value="90"
-                id="servo-5"
-                oninput="document.getElementById('servo-value-5').textContent = this.value + '°'"
-              />
-              <span id="servo-value-5">90°</span>
-              <button onclick="setServo(5)">Set</button>
-            </div>
-          </div>
+        <div class="servo-control" id="servo-control-0">
+          <label>J0 (GPIO_NUM_35):</label>
+          <input
+            type="range"
+            value="90"
+            id="servo-0"
+            oninput="setServoUI(0)"
+          />
+          <span id="servo-value-0">90°</span>
+          <button onclick="setServo(0)">Set</button>
         </div>
+
+        <!-- J1: master (GPIO36) + follower (GPIO37) -->
+        <div class="servo-control" id="servo-control-1">
+          <label>J1 (GPIO_NUM_36 + GPIO_NUM_37):</label>
+          <input
+            type="range"
+            value="90"
+            id="servo-1"
+            oninput="setServoUI(1)"
+          />
+          <span id="servo-value-1">90°</span>
+          <button onclick="setServoGrouped(1)">Set</button>
+        </div>
+
+        <!-- follower UI (GPIO37) -->
+        <div class="servo-control" id="servo-control-2">
+          <label>Follower (GPIO_NUM_37):</label>
+          <input
+            type="range"
+            value="90"
+            id="servo-2"
+            oninput="setServoUI(1)"
+            disabled
+          />
+          <span id="servo-value-2">90°</span>
+          <button disabled>Set</button>
+        </div>
+
+        <div class="servo-control" id="servo-control-3">
+          <label>J2 (GPIO_NUM_39):</label>
+          <input
+            type="range"
+            value="90"
+            id="servo-3"
+            oninput="setServoUI(3)"
+          />
+          <span id="servo-value-3">90°</span>
+          <button onclick="setServo(3)">Set</button>
+        </div>
+
+        <div class="servo-control" id="servo-control-4">
+          <label>J3 (GPIO_NUM_40):</label>
+          <input
+            type="range"
+            value="90"
+            id="servo-4"
+            oninput="setServoUI(4)"
+          />
+          <span id="servo-value-4">90°</span>
+          <button onclick="setServo(4)">Set</button>
+        </div>
+
+        <div class="servo-control" id="servo-control-5">
+          <label>J4 (GPIO_NUM_41):</label>
+          <input
+            type="range"
+            value="90"
+            id="servo-5"
+            oninput="setServoUI(5)"
+          />
+          <span id="servo-value-5">90°</span>
+          <button onclick="setServo(5)">Set</button>
+        </div>
+
+        <!-- pokud máš servo 6 (GPIO42) -->
+        <div class="servo-control" id="servo-control-6">
+          <label>J5 (GPIO_NUM_42) Gripper:</label>
+          <input
+            type="range"
+            value="90"
+            id="servo-6"
+            oninput="setServoUI(6)"
+          />
+          <span id="servo-value-6">90°</span>
+          <button onclick="setServo(6)">Set</button>
+        </div>
+
       </div>
+    </div>
+  </div>
+
 
       <div class="column">
         <div class="container">
