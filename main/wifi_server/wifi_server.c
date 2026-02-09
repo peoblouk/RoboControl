@@ -200,16 +200,17 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 
     cJSON *json = cJSON_Parse((char*)frame.payload);
     if (json) {
-        // SERVO CONTROL
-        cJSON *servo = cJSON_GetObjectItem(json, "servo");
-        cJSON *angle = cJSON_GetObjectItem(json, "angle");
-        if (cJSON_IsNumber(servo) && cJSON_IsNumber(angle)) {
-            servo_set_angle(servo->valueint, (float)angle->valuedouble);
-            ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"ok\",\"cmd\":\"servo\"}");
+        cJSON *cmd = cJSON_GetObjectItem(json, "cmd");
+
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "joint_set") == 0) {
+            cJSON *jid = cJSON_GetObjectItem(json, "id");
+            cJSON *angle = cJSON_GetObjectItem(json, "angle");
+            if (cJSON_IsNumber(jid) && cJSON_IsNumber(angle)) {
+                joint_set_angle(jid->valueint, (float)angle->valuedouble);
+                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"ok\",\"cmd\":\"joint_set\"}");
+            }
         }
 
-        // SENSORS ON-DEMAND
-        cJSON *cmd = cJSON_GetObjectItem(json, "cmd");
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"sensors")==0) {
             cJSON *root = cJSON_CreateObject();
             cJSON *arr  = cJSON_AddArrayToObject(root,"sensors");
@@ -225,7 +226,6 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             cJSON_Delete(root);
         }
 
-        // MOVE XYZ (queued into robot control task)
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"move_xyz") == 0) {
             cJSON *jx = cJSON_GetObjectItem(json, "x");
             cJSON *jy = cJSON_GetObjectItem(json, "y");
@@ -247,7 +247,6 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             }
         }
 
-        // GCODE LINE (Manual commands)
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"gcode_line") == 0) {
             cJSON *jl = cJSON_GetObjectItem(json, "line");
             int fd = httpd_req_to_sockfd(req);
@@ -271,7 +270,6 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             }
         }
 
-        // GCODE STOP
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"gcode_stop") == 0) {
             int fd = httpd_req_to_sockfd(req);
             gcode_stop();

@@ -51,42 +51,42 @@
 // ===============================
 // ROBOT: ARM GEOMETRY (mm)
 // ===============================
-#define L0  50.0f
-#define L1  30.0f
-#define L2  70.0f
-#define L3  60.0f
-#define L4  20.0f
-#define L5  10.0f
+#define L0  82.0f
+#define L1  112.5f
+#define L2  73.0f
+#define L3  0.0f
+#define L4  0.0f
+#define L5  0.0f
 
 // ===============================
 // ROBOT: JOINT LIMITS (deg / deg/s)
 // ===============================
-#define J0_MIN 10
-#define J0_MAX 170
+#define J0_MIN 23
+#define J0_MAX 180
 #define J0_V   60
 
-#define J1_MIN 15
-#define J1_MAX 165
+#define J1_MIN 27
+#define J1_MAX 173
 #define J1_V   60
 
 #define J2_MIN 15
-#define J2_MAX 165
+#define J2_MAX 175
 #define J2_V   60
 
-#define J3_MIN 20
-#define J3_MAX 160
+#define J3_MIN 5
+#define J3_MAX 170 
 #define J3_V   60
 
-#define J4_MIN 0
-#define J4_MAX 180
+#define J4_MIN 8
+#define J4_MAX 175
 #define J4_V   90
 
-#define J5_MIN 0
-#define J5_MAX 180
+#define J5_MIN 43
+#define J5_MAX 170
 #define J5_V   90
 
-#define J6_MIN 0
-#define J6_MAX 180
+#define J6_MIN 20
+#define J6_MAX 80
 #define J6_V   90
 
 // ===============================
@@ -153,7 +153,6 @@
 // ===============================
 // Robot Positions
 // ===============================
-
 // HOME position
 #define HOME_J0 40
 #define HOME_J1 40   // J1 master+follower

@@ -12,40 +12,55 @@ static rt_stats_t g_move_cmd_stats;
 // ===============================
 // COMMAND HANDLERS 
 // ===============================
-static int cmd_servo(int argc, char **argv) // servo <id> <angle>
+static int cmd_joint(int argc, char **argv) // joint <id> <angle>
 {
     if (argc != 3) {
-        printf("Usage: servo <id> <angle>\n");
+        printf("Usage: joint <id> <angle>\n");
         return 0;
     }
 
     int   id    = atoi(argv[1]);
     float angle = strtof(argv[2], NULL);
 
-    if (id < 0 || id >= SERVO_COUNT) {
+    if (id < 0 || id >= JOINT_COUNT) {
         printf("ERR: invalid id\n");
         return 0;
     }
 
-    if (angle < g_joint_limits[id].min_deg || angle > g_joint_limits[id].max_deg) {
-        printf("ERR: angle out of range (allowed %.1f - %.1f)\n",
-               g_joint_limits[id].min_deg, g_joint_limits[id].max_deg);
+    float lo = 0.0f, hi = 180.0f;
+
+    if (id == 1) {
+        // J1 = servo 1 (master) + servo 2 (follower)
+        lo = g_joint_limits[1].min_deg;
+        hi = g_joint_limits[1].max_deg;
+
+        if (g_joint_limits[2].min_deg > lo) lo = g_joint_limits[2].min_deg;
+        if (g_joint_limits[2].max_deg < hi) hi = g_joint_limits[2].max_deg;
+    } else {
+        static const int joint_to_servo[JOINT_COUNT] = { 0, 1, 3, 4, 5, 6 };
+        int s = joint_to_servo[id];
+        lo = g_joint_limits[s].min_deg;
+        hi = g_joint_limits[s].max_deg;
+    }
+
+    if (angle < lo || angle > hi) {
+        printf("ERR: angle out of range (allowed %.1f - %.1f)\n", lo, hi);
         return 0;
     }
 
     int64_t t_start_us = esp_timer_get_time();
-    servo_set_angle(id, angle);
+    joint_set_angle(id, angle);
     int64_t t_end_us = esp_timer_get_time();
 
     int64_t dt_us = t_end_us - t_start_us;
     rt_stats_add_sample(&g_servo_cmd_stats, dt_us);
 
-    #ifdef STATS_PRINT
-    printf("OK: Servo %d -> %.1f° (time: %lld us)\n", id, angle, (long long)dt_us);
+#ifdef STATS_PRINT
+    printf("OK: Joint %d -> %.1f° (time: %lld us)\n", id, angle, (long long)dt_us);
     if (g_servo_cmd_stats.count % 10 == 0) {
-        rt_stats_print("SERVO_CMD", &g_servo_cmd_stats);
+        rt_stats_print("JOINT_CMD", &g_servo_cmd_stats);
     }
-    #endif
+#endif
 
     return 0;
 }
@@ -331,10 +346,10 @@ static int cmd_test(int argc, char **argv) // test
 static void register_commands(void)
 {
     const esp_console_cmd_t servo_cmd = {
-        .command  = "servo",
-        .help     = "Set servo angle: servo <id> <angle>",
+        .command  = "joint",
+        .help     = "Set joint angle: joint <id> <angle>",
         .hint     = NULL,
-        .func     = &cmd_servo,
+        .func     = &cmd_joint,
         .argtable = NULL,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&servo_cmd));

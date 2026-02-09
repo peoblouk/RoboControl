@@ -1,26 +1,29 @@
 // ===============================
-// robot_io.c
+// robot_io.h
 // ===============================
 
 #ifndef ROBOT_IO
 #define ROBOT_IO
-#include "config.h"   // Configuration
+
+#include "config.h"
 
 #include "esp_log.h"
 #include "math.h"
 #include "driver/ledc.h"
-#include "esp_adc/adc_oneshot.h" // #include "driver/adc.h"
+#include "esp_adc/adc_oneshot.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include <stdbool.h>
-#include "gcode.h" // G-code interpreter
 
+#include "gcode.h"
 
 // Radians / Degrees conversion
 #define RAD2DEG(x) ((x) * 180.0f / M_PI)
 #define DEG2RAD(x) ((x) * M_PI / 180.0f)
+
+#define JOINT_COUNT 6
 
 // ===============================
 // SERVO CONFIGURATION (PWM output)
@@ -33,27 +36,7 @@ typedef struct {
 extern servo_t servos[SERVO_COUNT];
 
 // ===============================
-// JOINT LIMITS (per-axis safety)
-// ===============================
-typedef struct {
-    float min_deg;     // mechanical minimum angle
-    float max_deg;     // mechanical maximum angle
-    float max_deg_s;   // max joint speed (deg/s) for planning
-} joint_limits_t;
-
-extern const joint_limits_t g_joint_limits[SERVO_COUNT];
-
-// Validate/clamp helper for joint angles
-bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp);
-
-// XYZ workspace / reachability check before IK
-bool robot_xyz_reachable(float x, float y, float z);
-
-// Compute minimum safe duration from max joint speed limits
-float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_COUNT]);
-
-// ===============================
-//  SENSOR CONFIGURATION (ADC input)
+// SENSOR CONFIGURATION (ADC input)
 // ===============================
 typedef struct {
     adc_unit_t unit;
@@ -63,13 +46,24 @@ typedef struct {
 extern sensor_t sensors[SENSOR_COUNT];
 
 // ===============================
+// JOINT LIMITS (per-axis safety)
+// ===============================
+typedef struct {
+    float min_deg;
+    float max_deg;
+    float max_deg_s;
+} joint_limits_t;
+
+extern const joint_limits_t g_joint_limits[SERVO_COUNT];
+
+// ===============================
 // TRAJECTORY SEGMENT STRUCTURE
 // ===============================
 typedef struct {
     float q0[SERVO_COUNT];
     float q1[SERVO_COUNT];
-    float T;      
-    float t;      
+    float T;
+    float t;
     bool  active;
 } traj_seg_t;
 
@@ -78,19 +72,25 @@ typedef struct {
 // ===============================
 void servos_init(void);
 void sensors_init(void);
-int sensor_read_raw(int id);
+
+int   sensor_read_raw(int id);
 float sensor_read_angle(int id);
+
 void servo_set_angle(int servo_id, float angle);
+void joint_set_angle(int joint_id, float angle);
+
+bool  robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp);
+bool  robot_xyz_reachable(float x, float y, float z);
+float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_COUNT]);
+
 void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT]);
 void move_to_position(float q_target[SERVO_COUNT]);
-
 
 // Type of robot command
 typedef enum {
     ROBOT_CMD_NONE = 0,
     ROBOT_CMD_MOVE_JOINTS,
-    ROBOT_CMD_MOVE_XYZ,        
-
+    ROBOT_CMD_MOVE_XYZ,
     ROBOT_CMD_MOVE_JOINTS_T,
     ROBOT_CMD_QUEUE_FLUSH
 } robot_cmd_type_t;
@@ -98,18 +98,17 @@ typedef enum {
 // Command structure
 typedef struct {
     robot_cmd_type_t type;
-    float q_target[SERVO_COUNT];  // target joint angles
-    float x, y, z;                // target XYZ (MOVE_XYZ)
-    float duration_s;             // duration for movement (MOVE_JOINTS_T)
+    float q_target[SERVO_COUNT];
+    float x, y, z;
+    float duration_s;
 } robot_cmd_t;
 
 // ===============================
-// FUNCTION PROTOTYPES
+// CONTROL API
 // ===============================
 void robot_control_start(void);
 bool robot_cmd_move_joints(const float q_target[SERVO_COUNT]);
 bool robot_cmd_move_xyz(float x, float y, float z);
-
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout);
 void robot_cmd_queue_flush(void);
 

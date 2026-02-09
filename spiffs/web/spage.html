@@ -129,11 +129,15 @@
         value.textContent = clamped.toFixed(1) + "°";
       }
 
-      // Set servo angle
-      function setServo(servoId) {
-        const angle = document.getElementById(`servo-${servoId}`).value;
-        ws.send(JSON.stringify({ servo: servoId, angle: parseInt(angle) }));
-        document.getElementById(`servo-value-${servoId}`).textContent = angle + "°";
+      function setJointUI(jointId) {
+        const angle = document.getElementById(`joint-${jointId}`).value;
+        document.getElementById(`joint-value-${jointId}`).textContent = angle + "°";
+      }
+
+      function setJoint(jointId) {
+        const angle = document.getElementById(`joint-${jointId}`).value;
+        ws.send(JSON.stringify({ cmd: "joint_set", id: jointId, angle: parseInt(angle) }));
+        document.getElementById(`joint-value-${jointId}`).textContent = angle + "°";
       }
 
       // Move to XYZ
@@ -361,38 +365,23 @@
           <input
             type="range"
             value="90"
-            id="servo-0"
-            oninput="setServoUI(0)"
+            id="joint-0"
+            oninput="setJointUI(0)"
           />
-          <span id="servo-value-0">90°</span>
-          <button onclick="setServo(0)">Set</button>
+          <span id="joint-value-0">90°</span>
+          <button onclick="setJoint(0)">Set</button>
         </div>
 
-        <!-- J1: master (GPIO36) + follower (GPIO37) -->
         <div class="servo-control" id="servo-control-1">
           <label>J1 (GPIO_NUM_36 + GPIO_NUM_37):</label>
           <input
             type="range"
             value="90"
-            id="servo-1"
-            oninput="setServoUI(1)"
+            id="joint-1"
+            oninput="setJointUI(1)"
           />
-          <span id="servo-value-1">90°</span>
-          <button onclick="setServoGrouped(1)">Set</button>
-        </div>
-
-        <!-- follower UI (GPIO37) -->
-        <div class="servo-control" id="servo-control-2">
-          <label>Follower (GPIO_NUM_37):</label>
-          <input
-            type="range"
-            value="90"
-            id="servo-2"
-            oninput="setServoUI(1)"
-            disabled
-          />
-          <span id="servo-value-2">90°</span>
-          <button disabled>Set</button>
+          <span id="joint-value-1">90°</span>
+          <button onclick="setJoint(1)">Set</button>
         </div>
 
         <div class="servo-control" id="servo-control-3">
@@ -400,11 +389,11 @@
           <input
             type="range"
             value="90"
-            id="servo-3"
-            oninput="setServoUI(3)"
+            id="joint-2"
+            oninput="setJointUI(2)"
           />
-          <span id="servo-value-3">90°</span>
-          <button onclick="setServo(3)">Set</button>
+          <span id="joint-value-2">90°</span>
+          <button onclick="setJoint(2)">Set</button>
         </div>
 
         <div class="servo-control" id="servo-control-4">
@@ -412,11 +401,11 @@
           <input
             type="range"
             value="90"
-            id="servo-4"
-            oninput="setServoUI(4)"
+            id="joint-3"
+            oninput="setJointUI(3)"
           />
-          <span id="servo-value-4">90°</span>
-          <button onclick="setServo(4)">Set</button>
+          <span id="joint-value-3">90°</span>
+          <button onclick="setJoint(3)">Set</button>
         </div>
 
         <div class="servo-control" id="servo-control-5">
@@ -424,24 +413,23 @@
           <input
             type="range"
             value="90"
-            id="servo-5"
-            oninput="setServoUI(5)"
+            id="joint-4"
+            oninput="setJointUI(4)"
           />
-          <span id="servo-value-5">90°</span>
-          <button onclick="setServo(5)">Set</button>
+          <span id="joint-value-4">90°</span>
+          <button onclick="setJoint(4)">Set</button>
         </div>
 
-        <!-- pokud máš servo 6 (GPIO42) -->
         <div class="servo-control" id="servo-control-6">
           <label>J5 (GPIO_NUM_42) Gripper:</label>
           <input
             type="range"
             value="90"
-            id="servo-6"
-            oninput="setServoUI(6)"
+            id="joint-5"
+            oninput="setJointUI(5)"
           />
-          <span id="servo-value-6">90°</span>
-          <button onclick="setServo(6)">Set</button>
+          <span id="joint-value-5">90°</span>
+          <button onclick="setJoint(5)">Set</button>
         </div>
 
       </div>
