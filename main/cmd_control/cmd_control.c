@@ -267,7 +267,6 @@ static int cmd_stats(int argc, char **argv) // stats
     return 0;
 }
 
-/////
 static int cmd_tasks(int argc, char **argv) // tasks
 {
     (void)argc;
@@ -319,26 +318,46 @@ static int cmd_tasks(int argc, char **argv) // tasks
     return 0;
 }
 
-static int cmd_test(int argc, char **argv) // test
+static int cmd_test(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
-
+    (void)argc; (void)argv;
     int ok = 1;
 
-    ok &= robot_cmd_move_xyz(100.0,   0.0,  80.0);
-    ok &= robot_cmd_move_xyz( 80.0,  80.0,  80.0);
-    ok &= robot_cmd_move_xyz( 80.0, -80.0,  80.0);
-    ok &= robot_cmd_move_xyz(100.0,   0.0,  80.0);
+    robot_cmd_queue_flush();
 
-    if (ok) {
-        printf("OK: Test sequence queued (4 positions)\n");
-    } else {
-        printf("ERR: Failed to queue all test moves\n");
-    }
+    float q[SERVO_COUNT];
+    for (int i = 0; i < SERVO_COUNT; i++) q[i] = 90.0f;
+
+    ok &= robot_cmd_move_joints_t(q, 2.0f, 0);
+
+    q[3] = 70.0f;  ok &= robot_cmd_move_joints_t(q, 2.0f, 0);
+    q[3] = 110.0f; ok &= robot_cmd_move_joints_t(q, 2.0f, 0);
+    q[3] = 90.0f;  ok &= robot_cmd_move_joints_t(q, 2.0f, 0);
+
+    printf(ok ? "OK: Joint sweep queued\n" : "ERR: Queue failed\n");
     return 0;
 }
+
 /////
+
+static int cmd_home(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+
+    float q[SERVO_COUNT];
+    for (int i = 0; i < SERVO_COUNT; i++) q[i] = 90.0f;
+
+    q[1] = HOME_J1; // servo 1 (J1 master)
+    q[3] = HOME_J2; // servo 3 (J2)
+    q[4] = HOME_J3;// servo 4 (J3)
+    q[5] = HOME_J4; // servo 5 (J4)
+
+    robot_validate_and_prepare_q(q, true);
+
+    bool ok = robot_cmd_move_joints(q);
+    printf(ok ? "OK: home queued\n" : "ERR: home not queued\n");
+    return 0;
+}
 
 // ===============================
 // COMMAND REGISTRATION
@@ -424,6 +443,15 @@ static void register_commands(void)
     .argtable = NULL,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&gcode_cmd));
+
+    const esp_console_cmd_t home_cmd = {
+        .command  = "home",
+        .help     = "Move robot to HOME position",
+        .hint     = NULL,
+        .func     = &cmd_home,
+        .argtable = NULL,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&home_cmd));
 }
 
 // ===============================

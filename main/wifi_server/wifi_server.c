@@ -200,24 +200,49 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 
     cJSON *json = cJSON_Parse((char*)frame.payload);
     if (json) {
-        cJSON *cmd = cJSON_GetObjectItem(json, "cmd");
+        cJSON *joint = cJSON_GetObjectItem(json, "joint");
+        cJSON *angle = cJSON_GetObjectItem(json, "angle");
+        if (cJSON_IsNumber(joint) && cJSON_IsNumber(angle)) {
+            int jid = joint->valueint;
+            float a = (float)angle->valuedouble;
 
-        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "joint_set") == 0) {
-            cJSON *jid = cJSON_GetObjectItem(json, "id");
-            cJSON *angle = cJSON_GetObjectItem(json, "angle");
-            if (cJSON_IsNumber(jid) && cJSON_IsNumber(angle)) {
-                joint_set_angle(jid->valueint, (float)angle->valuedouble);
-                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"ok\",\"cmd\":\"joint_set\"}");
+            if (jid >= 0 && jid < 6) {
+                joint_set_angle(jid, a);
+                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"ok\",\"cmd\":\"joint\"}");
+            } else {
+                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"bad_id\"}");
             }
         }
+
+        cJSON *servo = cJSON_GetObjectItem(json, "servo");
+        if (cJSON_IsNumber(servo) && cJSON_IsNumber(angle)) {
+            int id = servo->valueint;
+            float a = (float)angle->valuedouble;
+            static const int servo_to_joint[7] = { 0, 1, 1, 2, 3, 4, 5 };
+
+            if (id >= 0 && id < 7) {
+                joint_set_angle(servo_to_joint[id], a);
+                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"ok\",\"cmd\":\"joint\"}");
+            } else {
+                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"bad_id\"}");
+            }
+        }
+
+        // ===============================
+        // COMMANDS
+        // ===============================
+        cJSON *cmd = cJSON_GetObjectItem(json, "cmd");
 
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"sensors")==0) {
             cJSON *root = cJSON_CreateObject();
             cJSON *arr  = cJSON_AddArrayToObject(root,"sensors");
-            for (int i=0; i<SENSOR_COUNT; i++) {
+
+            static const int joint_to_servo[6] = { 0, 1, 3, 4, 5, 6 };
+
+            for (int i=0; i<6; i++) {
                 cJSON *o = cJSON_CreateObject();
                 cJSON_AddNumberToObject(o,"id",i);
-                cJSON_AddNumberToObject(o,"angle",sensor_read_angle(i));
+                cJSON_AddNumberToObject(o,"angle",robot_get_est_angle(joint_to_servo[i]));
                 cJSON_AddItemToArray(arr,o);
             }
             char *out = cJSON_PrintUnformatted(root);
@@ -287,10 +312,13 @@ static void ws_task_sensors(void *arg) {
     for (;;) {
         cJSON *root = cJSON_CreateObject();
         cJSON *arr  = cJSON_AddArrayToObject(root,"sensors");
-        for (int i=0;i<SENSOR_COUNT;i++) {
+
+        static const int joint_to_servo[6] = { 0, 1, 3, 4, 5, 6 };
+
+        for (int i=0;i<6;i++) {
             cJSON *o = cJSON_CreateObject();
             cJSON_AddNumberToObject(o,"id",i);
-            cJSON_AddNumberToObject(o,"angle",sensor_read_angle(i));
+            cJSON_AddNumberToObject(o,"angle",robot_get_est_angle(joint_to_servo[i]));
             cJSON_AddItemToArray(arr,o);
         }
         char *out = cJSON_PrintUnformatted(root);
@@ -304,7 +332,6 @@ static void ws_task_sensors(void *arg) {
 // ===============================
 // FILE SYSTEM MANAGER (TXT + GCODE)
 // ===============================
-
 static bool ext_allowed_(const char *name) {
     const char *dot = strrchr(name, '.');
     if (!dot) return false;
@@ -324,14 +351,14 @@ static void url_decode_(char *dst, const char *src){
         if (src[si] == '%' && src[si+1] && src[si+2]) {
             int hi = hex2int_(src[si+1]);
             int lo = hex2int_(src[si+2]);
-            if (hi >= 0 && lo >= 0) { 
-                dst[di++] = (char)((hi << 4) | lo); 
-                si += 2; 
-                continue; 
+            if (hi >= 0 && lo >= 0) {
+                dst[di++] = (char)((hi << 4) | lo);
+                si += 2;
+                continue;
             }
-        } else if (src[si] == '+') { 
-            dst[di++] = ' '; 
-            continue; 
+        } else if (src[si] == '+') {
+            dst[di++] = ' ';
+            continue;
         }
         dst[di++] = src[si];
     }
@@ -384,7 +411,6 @@ static esp_err_t files_list_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-
 static esp_err_t file_any_handler(httpd_req_t *req) {
     if (strncmp(req->uri, FILE_PREFIX, strlen(FILE_PREFIX)) != 0)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad uri");
@@ -394,7 +420,7 @@ static esp_err_t file_any_handler(httpd_req_t *req) {
     if (!make_path_from_tail_(tail, path, sizeof(path)))
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid name");
 
-    if (req->method == HTTP_GET) { // READ
+    if (req->method == HTTP_GET) {
         FILE *f = fopen(path, "rb");
         if (!f) return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
         httpd_resp_set_type(req, "text/plain; charset=utf-8");
@@ -406,12 +432,12 @@ static esp_err_t file_any_handler(httpd_req_t *req) {
         return httpd_resp_sendstr_chunk(req, NULL);
     }
 
-    if (req->method == HTTP_DELETE) {  // DELETE
+    if (req->method == HTTP_DELETE) {
         if (remove(path)==0) { httpd_resp_sendstr(req, "OK"); return ESP_OK; }
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "remove failed");
     }
 
-    if (req->method == HTTP_PUT) { // WRITE
+    if (req->method == HTTP_PUT) {
         FILE *f = fopen(path, "wb");
         if (!f) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "open failed");
 
@@ -454,6 +480,38 @@ static esp_err_t upload_post_handler(httpd_req_t *req) {
     httpd_resp_sendstr(req, "File uploaded successfully!");
     return ESP_OK;
 }
+// ===============================
+// JOINT LIMITS (from config.h)
+// ===============================
+
+static esp_err_t limits_get_handler(httpd_req_t *req)
+{
+    // joint limits from config.h (J0_MIN, J0_MAX, J0_V, ...)
+    char resp[512];
+    int n = snprintf(resp, sizeof(resp),
+        "{"
+          "\"joints\":["
+            "{\"id\":0,\"name\":\"J0\",\"min\":%.2f,\"max\":%.2f,\"v\":%.2f},"
+            "{\"id\":1,\"name\":\"J1\",\"min\":%.2f,\"max\":%.2f,\"v\":%.2f},"
+            "{\"id\":2,\"name\":\"J2\",\"min\":%.2f,\"max\":%.2f,\"v\":%.2f},"
+            "{\"id\":3,\"name\":\"J3\",\"min\":%.2f,\"max\":%.2f,\"v\":%.2f},"
+            "{\"id\":4,\"name\":\"J4\",\"min\":%.2f,\"max\":%.2f,\"v\":%.2f},"
+            "{\"id\":5,\"name\":\"J5\",\"min\":%.2f,\"max\":%.2f,\"v\":%.2f}"
+          "]"
+        "}",
+        (double)J0_MIN, (double)J0_MAX, (double)J0_V,
+        (double)J1_MIN, (double)J1_MAX, (double)J1_V,
+        (double)J2_MIN, (double)J2_MAX, (double)J2_V,
+        (double)J3_MIN, (double)J3_MAX, (double)J3_V,
+        (double)J4_MIN, (double)J4_MAX, (double)J4_V,
+        (double)J5_MIN, (double)J5_MAX, (double)J5_V
+    );
+
+    if (n <= 0) return httpd_resp_send_500(req);
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, resp, strlen(resp));
+}
 
 // ===============================
 // NVS WIFI CONFIG
@@ -488,7 +546,7 @@ void erase_wifi_nvs(void) {
 
 // ===============================
 // mDNS
-// =============================== 
+// ===============================
 static void start_mdns(void)
 {
     esp_err_t err = mdns_init();
@@ -506,7 +564,6 @@ static void start_mdns(void)
     mdns_service_remove_all();
     ESP_ERROR_CHECK(mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0));
 }
-
 
 // ===============================
 // WIFI SOFTAP INIT
@@ -534,8 +591,6 @@ void wifi_init_softap(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,&wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_ERROR_CHECK(esp_wifi_start());
     start_mdns();
 }
 
@@ -558,6 +613,7 @@ static httpd_handle_t start_webserver(void) {
         { "/favicon.ico",               HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
         { "/wifi_reset", HTTP_POST, wifi_reset_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/wifi_config", HTTP_ANY, wifi_config_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
+        { "/api/limits", HTTP_GET, limits_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/ws", HTTP_GET, ws_handler, NULL, .is_websocket = true, .handle_ws_control_frames = true },
 
         { "/upload", HTTP_POST, upload_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
@@ -574,7 +630,7 @@ static httpd_handle_t start_webserver(void) {
 // ===============================
 // WEBSERVER START
 // ===============================
-void wifi_servo_server_start(void) {
+void wifi_server_start(void) {
     g_ws_lock = xSemaphoreCreateMutex();
     for (int i=0;i<WS_MAX_CLIENTS;i++) g_ws_clients[i] = -1;
 

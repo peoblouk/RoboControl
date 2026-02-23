@@ -1,5 +1,4 @@
 <!-- @format -->
-
 <!doctype html>
 <html lang="en">
   <head>
@@ -7,156 +6,341 @@
     <link rel="icon" href="web/robocontrol.ico" type="image/x-icon" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ESP32 Servo Control</title>
+    <title>ESP32 Robo Control</title>
 
     <script>
-      let ws;
-      document.addEventListener("DOMContentLoaded", () => {
-        const gauges = document.querySelectorAll(".gauge");
-        gauges.forEach((g) => createGauge(g, g.dataset.id));
-      });
+      let ws = null;
+      let limits = null;
 
-      function initWS() {
-        ws = new WebSocket("ws://" + window.location.host + "/ws");
-
-        ws.onopen = () => {
-          console.log("WS connected");
-          document.getElementById("wifi-dot").style.background = "#22c55e"; // Green
-          document.getElementById("wifi-state").textContent = "Connected";
-
-          ws.send(JSON.stringify({ cmd: "sensors" }));
-        };
-
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-
-          if (data.state) {
-            const elText = document.getElementById("robot-state");
-            const elDot = document.getElementById("robot-dot");
-
-            elText.textContent = data.state;
-
-            if (data.state === "IDLE") {
-              elDot.style.background = "#fbbf24"; // Orange
-            } else if (data.state === "RUNNING") {
-              elDot.style.background = "#22c55e"; // Green
-            } else if (data.state === "ALARM" || data.state === "ERROR") {
-              elDot.style.background = "#ef4444"; // Red
-            } else {
-              elDot.style.background = "gray";
-            }
-          }
-
-          if (data.sensors) {
-            const container = document.getElementById("sensor-values");
-
-            if (container) {
-              container.innerHTML = "";
-            }
-
-            data.sensors.forEach((s) => {
-              const g = document.querySelector(`.gauge[data-id="${s.id}"]`);
-              if (g) updateGauge(g, s.angle);
-
-              if (container) {
-                const div = document.createElement("div");
-                div.className = "sensor-value";
-                div.innerHTML = `<strong>Sensor ${s.id}:</strong> Angle: ${s.angle.toFixed(1)}°`;
-                container.appendChild(div);
-              }
-            });
-          }
-
-          if (data.status) {
-            console.log("WS status:", data.status);
-          }
-        };
-
-        ws.onclose = () => {
-          console.log("WS disconnected, retrying...");
-
-          document.getElementById("wifi-dot").style.background = "#ef4444";
-          document.getElementById("wifi-state").textContent = "Disconnected";
-
-          document.getElementById("robot-dot").style.background = "#888";
-          document.getElementById("robot-state").textContent = "Offline";
-
-          setTimeout(initWS, 2000);
-        };
-      }
-
-      // Gauge
       const GAUGE_MIN = 0;
       const GAUGE_MAX = 180;
       const TOLERANCE = 5;
 
-      function gaugeColor(angle) {
-        if (angle <= GAUGE_MIN + TOLERANCE || angle >= GAUGE_MAX - TOLERANCE) return "#ef4444";
-        if (angle < 20 || angle > 160) return "#f59e0b";
-        return "#22c55e";
+      const jointDirty = Array(6).fill(false);
+      const jointTarget = Array(6).fill(null);
+
+      function clearDirty(jid) {
+        jointDirty[jid] = false;
+        jointTarget[jid] = null;
       }
 
-      function createGauge(el, id) {
-        el.innerHTML = `
-          <svg viewBox="0 0 100 50">
-            <path d="M10 50 A40 40 0 0 1 90 50"
-                  fill="none"
-                  stroke="#334155"
-                  stroke-width="8"/>
-            <path class="gauge-fill"
-                  d="M10 50 A40 40 0 0 1 90 50"
-                  fill="none"
-                  stroke="#22c55e"
-                  stroke-width="8"
-                  stroke-dasharray="126"
-                  stroke-dashoffset="126"/>
-          </svg>
-          <div class="gauge-value">--°</div>
-          <div class="gauge-label">Servo ${id}</div>
-        `;
+      function clearAllDirty() {
+        for (let i = 0; i < 6; i++) clearDirty(i);
       }
 
-      function updateGauge(el, angle) {
-        const fill = el.querySelector(".gauge-fill");
-        const value = el.querySelector(".gauge-value");
+      const editingJoints = new Set();
 
-        const clamped = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, angle));
-        const percent = clamped / GAUGE_MAX;
-        const dash = 126 * (1 - percent);
+      const jointEditUntil = Array(6).fill(0);
+      function lockJoint(jid, ms = 800) {
+        jointEditUntil[jid] = Date.now() + ms;
+      }
+      function isLocked(jid) {
+        return Date.now() < jointEditUntil[jid];
+      }
 
-        fill.style.strokeDashoffset = dash;
-        fill.style.stroke = gaugeColor(clamped);
-        value.textContent = clamped.toFixed(1) + "°";
+      function wsUrl() {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        return `${proto}://${location.host}/ws`;
+      }
+
+      function clamp(v, lo, hi) {
+        v = Number(v);
+        lo = Number(lo);
+        hi = Number(hi);
+        if (Number.isNaN(v)) v = lo;
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+      }
+
+      function setWifiUI(online) {
+        const dot = document.getElementById("wifi-dot");
+        const txt = document.getElementById("wifi-state");
+        if (!dot || !txt) return;
+        dot.style.background = online ? "#22c55e" : "#ef4444";
+        txt.textContent = online ? "Connected" : "Disconnected";
+      }
+
+      function setRobotUI(state) {
+        const elText = document.getElementById("robot-state");
+        const elDot = document.getElementById("robot-dot");
+        if (!elText || !elDot) return;
+
+        elText.textContent = state || "Unknown";
+
+        if (state === "IDLE") elDot.style.background = "#fbbf24";
+        else if (state === "RUNNING") elDot.style.background = "#22c55e";
+        else if (state === "ALARM" || state === "ERROR") elDot.style.background = "#ef4444";
+        else if (state === "STOPPED") elDot.style.background = "#ef4444";
+        else elDot.style.background = "#888";
+      }
+
+      async function loadLimits() {
+        try {
+          const r = await fetch("/api/limits");
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          const data = await r.json();
+          if (!data || !Array.isArray(data.joints) || data.joints.length < 6) throw new Error("Bad limits JSON");
+          limits = data;
+          applyLimitsToSliders();
+        } catch (e) {
+          limits = null;
+        }
+      }
+
+      function getJointLimit(jid) {
+        if (!limits) return null;
+        return limits.joints.find((j) => Number(j.id) === Number(jid)) || null;
+      }
+
+      function applyLimitsToSliders() {
+        for (let jid = 0; jid < 6; jid++) {
+          const lim = getJointLimit(jid);
+          const input = document.getElementById(`joint-${jid}`);
+          const targetEl = document.getElementById(`joint-value-${jid}`);
+          if (!input || !targetEl) continue;
+
+          if (lim) {
+            input.min = lim.min;
+            input.max = lim.max;
+            input.step = "1";
+          } else {
+            input.min = "0";
+            input.max = "180";
+            input.step = "1";
+          }
+
+          const lo = Number(input.min || 0);
+          const hi = Number(input.max || 180);
+
+          if (jointDirty[jid] && jointTarget[jid] != null) {
+            jointTarget[jid] = clamp(jointTarget[jid], lo, hi);
+            input.value = jointTarget[jid];
+            targetEl.textContent = `${jointTarget[jid]}°`;
+          } else {
+            const v = clamp(input.value, lo, hi);
+            input.value = v;
+            targetEl.textContent = `${Number(v).toFixed(0)}°`;
+          }
+        }
+      }
+
+      function installJointLocks() {
+        for (let jid = 0; jid < 6; jid++) {
+          const el = document.getElementById(`joint-${jid}`);
+          if (!el) continue;
+
+          el.addEventListener("pointerdown", () => {
+            editingJoints.add(jid);
+            lockJoint(jid, 2000);
+          });
+          el.addEventListener("pointerup", () => {
+            editingJoints.delete(jid);
+            lockJoint(jid, 1200);
+          });
+          el.addEventListener("pointercancel", () => {
+            editingJoints.delete(jid);
+            lockJoint(jid, 1200);
+          });
+          el.addEventListener("blur", () => {
+            editingJoints.delete(jid);
+            lockJoint(jid, 1200);
+          });
+          el.addEventListener("mouseleave", () => {
+            editingJoints.delete(jid);
+            lockJoint(jid, 1200);
+          });
+
+          el.addEventListener(
+            "touchstart",
+            () => {
+              editingJoints.add(jid);
+              lockJoint(jid, 2000);
+            },
+            { passive: true },
+          );
+          el.addEventListener(
+            "touchend",
+            () => {
+              editingJoints.delete(jid);
+              lockJoint(jid, 1200);
+            },
+            { passive: true },
+          );
+        }
+      }
+
+      function initWS() {
+        ws = new WebSocket(wsUrl());
+
+        ws.onopen = () => {
+          setWifiUI(true);
+          ws.send(JSON.stringify({ cmd: "sensors" }));
+        };
+
+        ws.onmessage = (event) => {
+          let data;
+          try {
+            data = JSON.parse(event.data);
+          } catch (e) {
+            return;
+          }
+
+          if (data.state) setRobotUI(data.state);
+
+          if (data.sensors && Array.isArray(data.sensors)) {
+            data.sensors.forEach((s) => {
+              const jid = Number(s.id);
+              const ang = Number(s.angle);
+
+              const g = document.querySelector(`.gauge[data-id="${jid}"]`);
+              if (g) updateGauge(g, ang);
+
+              if (Number.isNaN(jid) || Number.isNaN(ang)) return;
+
+              const input = document.getElementById(`joint-${jid}`);
+              const targetEl = document.getElementById(`joint-value-${jid}`);
+              const actEl = document.getElementById(`joint-act-${jid}`);
+              if (!input || !targetEl || !actEl) return;
+
+              const lim = getJointLimit(jid);
+              const lo = lim ? lim.min : Number(input.min || 0);
+              const hi = lim ? lim.max : Number(input.max || 180);
+              const actual = clamp(ang, lo, hi);
+
+              actEl.textContent = `${actual.toFixed(0)}°`;
+
+              const focused = document.activeElement === input;
+              const blocked = isLocked(jid) || editingJoints.has(jid) || focused;
+
+              if (!jointDirty[jid] && !blocked) {
+                input.value = actual;
+                targetEl.textContent = `${actual.toFixed(0)}°`;
+                return;
+              }
+
+              const t = jointTarget[jid] != null ? jointTarget[jid] : Number(input.value);
+              const tc = clamp(t, lo, hi);
+              targetEl.textContent = `${tc.toFixed(0)}°`;
+
+              if (jointDirty[jid] && jointTarget[jid] != null && !editingJoints.has(jid) && !focused) {
+                if (Math.abs(actual - jointTarget[jid]) <= 1) clearDirty(jid);
+              }
+            });
+          }
+        };
+
+        ws.onclose = () => {
+          setWifiUI(false);
+          setRobotUI("Offline");
+          setTimeout(initWS, 2000);
+        };
+
+        ws.onerror = () => {};
       }
 
       function setJointUI(jointId) {
-        const angle = document.getElementById(`joint-${jointId}`).value;
-        document.getElementById(`joint-value-${jointId}`).textContent = angle + "°";
+        lockJoint(jointId, 2000);
+
+        const input = document.getElementById(`joint-${jointId}`);
+        const targetEl = document.getElementById(`joint-value-${jointId}`);
+        if (!input || !targetEl) return;
+
+        const lim = getJointLimit(jointId);
+        const lo = lim ? lim.min : Number(input.min || 0);
+        const hi = lim ? lim.max : Number(input.max || 180);
+
+        const v = clamp(input.value, lo, hi);
+        input.value = v;
+
+        jointDirty[jointId] = true;
+        jointTarget[jointId] = v;
+
+        targetEl.textContent = `${Number(v).toFixed(0)}°`;
       }
 
       function setJoint(jointId) {
-        const angle = document.getElementById(`joint-${jointId}`).value;
-        ws.send(JSON.stringify({ cmd: "joint_set", id: jointId, angle: parseInt(angle) }));
-        document.getElementById(`joint-value-${jointId}`).textContent = angle + "°";
+        if (!ws || ws.readyState !== 1) {
+          alert("WebSocket not connected.");
+          return;
+        }
+
+        const input = document.getElementById(`joint-${jointId}`);
+        const targetEl = document.getElementById(`joint-value-${jointId}`);
+        if (!input || !targetEl) return;
+
+        const lim = getJointLimit(jointId);
+        const lo = lim ? lim.min : Number(input.min || 0);
+        const hi = lim ? lim.max : Number(input.max || 180);
+
+        const v = clamp(input.value, lo, hi);
+        input.value = v;
+
+        jointDirty[jointId] = true;
+        jointTarget[jointId] = v;
+
+        targetEl.textContent = `${Number(v).toFixed(0)}°`;
+
+        lockJoint(jointId, 2000);
+        ws.send(JSON.stringify({ joint: jointId, angle: Number(v) }));
       }
 
-      // Move to XYZ
+      function goHome() {
+        if (!ws || ws.readyState !== 1) {
+          alert("WebSocket not connected.");
+          return;
+        }
+
+        const homeAngles = [90, 75, 80, 120, 60, 60];
+
+        clearAllDirty();
+        for (let i = 0; i < 6; i++) lockJoint(i, 1200);
+
+        for (let jid = 0; jid < homeAngles.length; jid++) {
+          const v = homeAngles[jid];
+
+          ws.send(JSON.stringify({ joint: jid, angle: v }));
+
+          const input = document.getElementById(`joint-${jid}`);
+          const targetEl = document.getElementById(`joint-value-${jid}`);
+          if (input) input.value = v;
+          if (targetEl) targetEl.textContent = `${v}°`;
+          jointDirty[jid] = true;
+          jointTarget[jid] = v;
+        }
+
+        ws.send(JSON.stringify({ cmd: "sensors" }));
+        setTimeout(() => {
+          if (ws && ws.readyState === 1) ws.send(JSON.stringify({ cmd: "sensors" }));
+        }, 300);
+      }
+
       function moveXYZ() {
+        if (!ws || ws.readyState !== 1) {
+          alert("WebSocket not connected.");
+          return;
+        }
+
         const x = parseFloat(document.getElementById("x").value);
         const y = parseFloat(document.getElementById("y").value);
         const z = parseFloat(document.getElementById("z").value);
+
         if (isNaN(x) || isNaN(y) || isNaN(z)) {
           alert("Please enter valid numbers");
           return;
         }
+
         ws.send(JSON.stringify({ cmd: "move_xyz", x: x, y: y, z: z }));
       }
 
-      // Send manual G-code line
       function sendGcodeLine() {
+        if (!ws || ws.readyState !== 1) {
+          alert("WebSocket not connected.");
+          return;
+        }
+
         const input = document.getElementById("gcode_input");
         const line = input.value.trim();
-
         if (!line) {
           alert("Please enter a command");
           return;
@@ -166,7 +350,22 @@
         input.value = "";
       }
 
-      // File upload
+      function runFile(filename) {
+        if (!ws || ws.readyState !== 1) {
+          alert("WebSocket not connected.");
+          return;
+        }
+        if (!confirm(`Run program "${filename}"?`)) return;
+        ws.send(JSON.stringify({ cmd: "run_gcode", filename: filename }));
+        alert("Send.");
+      }
+
+      function stopRobot() {
+        if (!ws || ws.readyState !== 1) return;
+        ws.send(JSON.stringify({ cmd: "gcode_stop" }));
+        setRobotUI("STOPPED");
+      }
+
       async function uploadFile() {
         const fileInput = document.getElementById("fileInput");
         const file = fileInput.files[0];
@@ -184,31 +383,20 @@
           headers: { "Content-Type": "text/plain" },
           body: await file.text(),
         });
+
         if (!res.ok) {
           alert("Error uploading file");
           return;
         }
+
         fileInput.value = "";
         loadFiles();
-      }
-
-      // Load file list
-      function runFile(filename) {
-        if (!confirm(`Run program "${filename}"?`)) return;
-        ws.send(JSON.stringify({ cmd: "run_gcode", filename: filename }));
-        alert("Send.");
-      }
-
-      function stopRobot() {
-        ws.send(JSON.stringify({ cmd: "gcode_stop" }));
-
-        document.getElementById("robot-state").textContent = "STOPPED";
-        document.getElementById("robot-dot").style.background = "#ef4444";
       }
 
       async function loadFiles() {
         const list = document.getElementById("files-body");
         if (!list) return;
+
         list.innerHTML = `<tr><td colspan="5" style="padding:8px;">Loading…</td></tr>`;
 
         try {
@@ -224,22 +412,21 @@
           list.innerHTML = "";
           for (const f of files) {
             const tr = document.createElement("tr");
-
             tr.innerHTML = `
-        <td style="border-bottom:1px solid #eee; padding:6px 8px;">
-          <input class="file-chk" type="checkbox" value="${f.name}">
-        </td>
-        <td style="border-bottom:1px solid #eee; padding:6px 8px;">
-          <a href="/file/${encodeURIComponent(f.name)}" target="_blank">${f.name}</a>
-        </td>
-        <td style="border-bottom:1px solid #eee; padding:6px 8px; text-align:right;">${f.size} B</td>
-        <td style="border-bottom:1px solid #eee; padding:6px 8px; text-align:center;">
-           <button style="background: #22c55e; width: auto; padding: 5px 10px;" onclick="runFile('${f.name}')">▶ Run</button>
-        </td>
-        <td style="border-bottom:1px solid #eee; padding:6px 8px;">
-          <button style="background: #ef4444; width: auto; padding: 5px 10px;" data-del="${f.name}">Delete</button>
-        </td>
-      `;
+              <td style="border-bottom:1px solid #eee; padding:6px 8px;">
+                <input class="file-chk" type="checkbox" value="${f.name}">
+              </td>
+              <td style="border-bottom:1px solid #eee; padding:6px 8px;">
+                <a href="/file/${encodeURIComponent(f.name)}" target="_blank">${f.name}</a>
+              </td>
+              <td style="border-bottom:1px solid #eee; padding:6px 8px; text-align:right;">${f.size} B</td>
+              <td style="border-bottom:1px solid #eee; padding:6px 8px; text-align:center;">
+                <button style="background:#22c55e; width:auto; padding:5px 10px;" onclick="runFile('${f.name}')">▶ Run</button>
+              </td>
+              <td style="border-bottom:1px solid #eee; padding:6px 8px;">
+                <button style="background:#ef4444; width:auto; padding:5px 10px;" data-del="${f.name}">Delete</button>
+              </td>
+            `;
             list.appendChild(tr);
           }
 
@@ -260,7 +447,6 @@
         }
       }
 
-      // Delete selected files
       async function deleteSelected() {
         const checks = Array.from(document.querySelectorAll(".file-chk:checked"));
         if (!checks.length) {
@@ -275,11 +461,60 @@
         loadFiles();
       }
 
-      // Single onload hook (WS + files)
-      window.onload = function () {
+      function gaugeColor(angle) {
+        if (angle <= GAUGE_MIN + TOLERANCE || angle >= GAUGE_MAX - TOLERANCE) return "#ef4444";
+        if (angle < 20 || angle > 160) return "#f59e0b";
+        return "#22c55e";
+      }
+
+      function createGauge(el, id) {
+        el.innerHTML = `
+        <svg viewBox="0 0 100 50">
+          <path d="M10 50 A40 40 0 0 1 90 50"
+                fill="none"
+                stroke="#334155"
+                stroke-width="8"/>
+          <path class="gauge-fill"
+                d="M10 50 A40 40 0 0 1 90 50"
+                fill="none"
+                stroke="#22c55e"
+                stroke-width="8"
+                stroke-dasharray="126"
+                stroke-dashoffset="126"/>
+        </svg>
+        <div class="gauge-value">--°</div>
+        <div class="gauge-label">J${id}</div>
+      `;
+      }
+
+      function updateGauge(el, angle) {
+        const fill = el.querySelector(".gauge-fill");
+        const value = el.querySelector(".gauge-value");
+        if (!fill || !value) return;
+
+        const clamped = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, Number(angle)));
+        const percent = clamped / GAUGE_MAX;
+        const dash = 126 * (1 - percent);
+
+        fill.style.strokeDashoffset = dash;
+        fill.style.stroke = gaugeColor(clamped);
+        value.textContent = clamped.toFixed(1) + "°";
+      }
+
+      function boot() {
+        const gauges = document.querySelectorAll(".gauge");
+        gauges.forEach((g) => createGauge(g, g.dataset.id));
+
+        setWifiUI(false);
+        setRobotUI("Unknown");
+
         initWS();
         loadFiles();
-      };
+        loadLimits();
+        installJointLocks();
+      }
+
+      document.addEventListener("DOMContentLoaded", boot);
     </script>
   </head>
 
@@ -318,7 +553,7 @@
       </div>
     </div>
 
-<div class="main-container">
+    <div class="main-container">
       <div class="container">
         <h1>Move to XYZ</h1>
 
@@ -335,7 +570,10 @@
             <label for="z">Z [mm]:</label>
             <input type="number" id="z" step="1" value="100" />
           </div>
-          <button onclick="moveXYZ()">Move</button>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap">
+            <button onclick="moveXYZ()">Move</button>
+            <button onclick="goHome()" style="background: #22c55e">HOME</button>
+          </div>
         </div>
 
         <div class="container">
@@ -350,92 +588,87 @@
             <button style="width: auto" onclick="sendGcodeLine()">Send</button>
           </div>
         </div>
-        
       </div>
-    </div>
 
-  <div class="column">
-    <div class="container">
-      <h1>Servo Control - joint space (with limits)</h1>
+      <div class="column">
+        <div class="container">
+          <h1>Joint Control (with limits)</h1>
 
-      <div id="servo-controls">
+          <div id="servo-controls">
+            <div class="servo-control" id="servo-control-0">
+              <label>
+                <span>J0 (NUM_35):</span>
+                <span class="joint-act" id="joint-act-0">--°</span>
+              </label>
+              <div class="joint-line">
+                <input type="range" value="90" id="joint-0" oninput="setJointUI(0)" />
+                <span class="joint-target" id="joint-value-0">90°</span>
+                <button onclick="setJoint(0)">Set</button>
+              </div>
+            </div>
 
-        <div class="servo-control" id="servo-control-0">
-          <label>J0 (GPIO_NUM_35):</label>
-          <input
-            type="range"
-            value="90"
-            id="joint-0"
-            oninput="setJointUI(0)"
-          />
-          <span id="joint-value-0">90°</span>
-          <button onclick="setJoint(0)">Set</button>
+            <div class="servo-control" id="servo-control-1">
+              <label>
+                <span>J1 (NUM_36 + NUM_37):</span>
+                <span class="joint-act" id="joint-act-1">--°</span>
+              </label>
+              <div class="joint-line">
+                <input type="range" value="90" id="joint-1" oninput="setJointUI(1)" />
+                <span class="joint-target" id="joint-value-1">90°</span>
+                <button onclick="setJoint(1)">Set</button>
+              </div>
+            </div>
+
+            <div class="servo-control" id="servo-control-2">
+              <label>
+                <span>J2 (NUM_39):</span>
+                <span class="joint-act" id="joint-act-2">--°</span>
+              </label>
+              <div class="joint-line">
+                <input type="range" value="90" id="joint-2" oninput="setJointUI(2)" />
+                <span class="joint-target" id="joint-value-2">90°</span>
+                <button onclick="setJoint(2)">Set</button>
+              </div>
+            </div>
+
+            <div class="servo-control" id="servo-control-3">
+              <label>
+                <span>J3 (NUM_40):</span>
+                <span class="joint-act" id="joint-act-3">--°</span>
+              </label>
+              <div class="joint-line">
+                <input type="range" value="90" id="joint-3" oninput="setJointUI(3)" />
+                <span class="joint-target" id="joint-value-3">90°</span>
+                <button onclick="setJoint(3)">Set</button>
+              </div>
+            </div>
+
+            <div class="servo-control" id="servo-control-4">
+              <label>
+                <span>J4 (NUM_41):</span>
+                <span class="joint-act" id="joint-act-4">--°</span>
+              </label>
+              <div class="joint-line">
+                <input type="range" value="90" id="joint-4" oninput="setJointUI(4)" />
+                <span class="joint-target" id="joint-value-4">90°</span>
+                <button onclick="setJoint(4)">Set</button>
+              </div>
+            </div>
+
+            <div class="servo-control" id="servo-control-5">
+              <label>
+                <span>J5 (NUM_42) Gripper:</span>
+                <span class="joint-act" id="joint-act-5">--°</span>
+              </label>
+              <div class="joint-line">
+                <input type="range" value="90" id="joint-5" oninput="setJointUI(5)" />
+                <span class="joint-target" id="joint-value-5">90°</span>
+                <button onclick="setJoint(5)">Set</button>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <div class="servo-control" id="servo-control-1">
-          <label>J1 (GPIO_NUM_36 + GPIO_NUM_37):</label>
-          <input
-            type="range"
-            value="90"
-            id="joint-1"
-            oninput="setJointUI(1)"
-          />
-          <span id="joint-value-1">90°</span>
-          <button onclick="setJoint(1)">Set</button>
-        </div>
-
-        <div class="servo-control" id="servo-control-3">
-          <label>J2 (GPIO_NUM_39):</label>
-          <input
-            type="range"
-            value="90"
-            id="joint-2"
-            oninput="setJointUI(2)"
-          />
-          <span id="joint-value-2">90°</span>
-          <button onclick="setJoint(2)">Set</button>
-        </div>
-
-        <div class="servo-control" id="servo-control-4">
-          <label>J3 (GPIO_NUM_40):</label>
-          <input
-            type="range"
-            value="90"
-            id="joint-3"
-            oninput="setJointUI(3)"
-          />
-          <span id="joint-value-3">90°</span>
-          <button onclick="setJoint(3)">Set</button>
-        </div>
-
-        <div class="servo-control" id="servo-control-5">
-          <label>J4 (GPIO_NUM_41):</label>
-          <input
-            type="range"
-            value="90"
-            id="joint-4"
-            oninput="setJointUI(4)"
-          />
-          <span id="joint-value-4">90°</span>
-          <button onclick="setJoint(4)">Set</button>
-        </div>
-
-        <div class="servo-control" id="servo-control-6">
-          <label>J5 (GPIO_NUM_42) Gripper:</label>
-          <input
-            type="range"
-            value="90"
-            id="joint-5"
-            oninput="setJointUI(5)"
-          />
-          <span id="joint-value-5">90°</span>
-          <button onclick="setJoint(5)">Set</button>
-        </div>
-
       </div>
-    </div>
-  </div>
-
 
       <div class="column">
         <div class="container">
@@ -449,7 +682,9 @@
             <div class="gauge" data-id="5"></div>
           </div>
         </div>
+      </div>
 
+      <div class="column">
         <div class="container">
           <h2>Files (.txt, .gcode)</h2>
 
@@ -471,11 +706,12 @@
               </thead>
               <tbody id="files-body">
                 <tr>
-                  <td colspan="4" style="padding: 8px">Loading…</td>
+                  <td colspan="5" style="padding: 8px">Loading…</td>
                 </tr>
               </tbody>
             </table>
           </div>
+
           <button onclick="deleteSelected()">Delete selected</button>
         </div>
 

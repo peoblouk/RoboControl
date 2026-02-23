@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 static const char *TAG = "robot_io";
 static adc_oneshot_unit_handle_t s_adc1 = NULL;
@@ -48,12 +49,12 @@ sensor_t sensors[SENSOR_COUNT] = {
 
 const joint_limits_t g_joint_limits[SERVO_COUNT] = {
     { .min_deg = J0_MIN, .max_deg = J0_MAX, .max_deg_s = J0_V }, // servo 0 (J0)
-   { .min_deg = J1_MIN, .max_deg = J1_MAX, .max_deg_s = J1_V }, // servo 1 (J1 master)
+    { .min_deg = J1_MIN, .max_deg = J1_MAX, .max_deg_s = J1_V }, // servo 1 (J1 master)
     { .min_deg = J1_MIN, .max_deg = J1_MAX, .max_deg_s = J1_V }, // servo 2 (J1 follower)
     { .min_deg = J2_MIN, .max_deg = J2_MAX, .max_deg_s = J2_V }, // servo 3 (J2)
     { .min_deg = J3_MIN, .max_deg = J3_MAX, .max_deg_s = J3_V }, // servo 4 (J3)
     { .min_deg = J4_MIN, .max_deg = J4_MAX, .max_deg_s = J4_V }, // servo 5 (J4)
-    { .min_deg = J5_MIN, .max_deg = J5_MAX, .max_deg_s = J5_V }, // servo 6 (J5)
+    { .min_deg = J5_MIN, .max_deg = J5_MAX, .max_deg_s = J5_V }, // servo 6 (gripper)
 };
 
 typedef struct {
@@ -81,6 +82,84 @@ static inline int servo_follower(int servo_id) {
     return (servo_id == J1_A_SERVO) ? J1_B_SERVO : -1;
 }
 
+float robot_get_est_angle(int id)
+{
+    if (id < 0 || id >= SERVO_COUNT) return 0.0f;
+    return s_last_q[id];
+}
+
+// ===============================
+// SERVO/KINEMATICS MAPPING
+// ===============================
+static float OFF[SERVO_COUNT] = {90, 90, 90, 90, 90, 90, 90};
+static float DIR[SERVO_COUNT] = {+1, -1, +1, +1, +1, +1, +1};
+
+static inline float map_servo(int sid, float joint_deg_math) {
+    return OFF[sid] + DIR[sid] * joint_deg_math;
+}
+
+// --- J1 follower behavior ---
+#define J1_FOLLOWER_INVERT   0       // 1 = J1_B is inverted copy of J1_A, 0 = direct copy with trim
+#define J1_B_TRIM_DEG        +0.0f    // correction angle
+
+static inline float j1_b_from_j1_a(float a_deg)
+{
+#if J1_FOLLOWER_INVERT
+    return 180.0f - a_deg + J1_B_TRIM_DEG;
+#else
+    return a_deg + J1_B_TRIM_DEG;
+#endif
+}
+
+static inline void j1_a_allowed_range(float *lo, float *hi)
+{
+    float a_lo = g_joint_limits[J1_A_SERVO].min_deg;
+    float a_hi = g_joint_limits[J1_A_SERVO].max_deg;
+
+    const float b_lo = g_joint_limits[J1_B_SERVO].min_deg;
+    const float b_hi = g_joint_limits[J1_B_SERVO].max_deg;
+
+#if J1_FOLLOWER_INVERT
+    // b = 180 - a + trim  =>  a = 180 + trim - b
+    const float a_from_b_lo = 180.0f + J1_B_TRIM_DEG - b_hi;
+    const float a_from_b_hi = 180.0f + J1_B_TRIM_DEG - b_lo;
+#else
+    // b = a + trim => a = b - trim
+    const float a_from_b_lo = b_lo - J1_B_TRIM_DEG;
+    const float a_from_b_hi = b_hi - J1_B_TRIM_DEG;
+#endif
+
+    if (a_from_b_lo > a_lo) a_lo = a_from_b_lo;
+    if (a_from_b_hi < a_hi) a_hi = a_from_b_hi;
+
+    *lo = a_lo;
+    *hi = a_hi;
+}
+
+// --- angle->duty using your config ranges ---
+#define SERVO_DUTY_MAX ((1U << 14) - 1)   // timer is LEDC_TIMER_14_BIT
+
+static inline uint32_t angle_to_duty(float angle_deg)
+{
+    const float period_us = 1000000.0f / (float)SERVO_PWM_FREQ;
+
+    const float duty_min_f = ((float)SERVO_MIN_US / period_us) * (float)SERVO_DUTY_MAX;
+    const float duty_max_f = ((float)SERVO_MAX_US / period_us) * (float)SERVO_DUTY_MAX;
+
+    float t = angle_deg / 180.0f;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+
+    float duty_f = duty_min_f + (duty_max_f - duty_min_f) * t;
+    if (duty_f < 0) duty_f = 0;
+    if (duty_f > (float)SERVO_DUTY_MAX) duty_f = (float)SERVO_DUTY_MAX;
+
+    return (uint32_t)(duty_f + 0.5f);
+}
+
+// ===============================
+// JOINT LIMITS (per joint_id)
+// ===============================
 static void joint_limits_get(int joint_id, float *lo, float *hi, float *vmax)
 {
     int s = s_joint_master_servo[joint_id];
@@ -89,12 +168,9 @@ static void joint_limits_get(int joint_id, float *lo, float *hi, float *vmax)
     float v = g_joint_limits[s].max_deg_s;
 
     if (s == J1_A_SERVO) {
-        float l2 = g_joint_limits[J1_B_SERVO].min_deg;
-        float h2 = g_joint_limits[J1_B_SERVO].max_deg;
-        float v2 = g_joint_limits[J1_B_SERVO].max_deg_s;
+        j1_a_allowed_range(&l, &h);
 
-        if (l2 > l) l = l2;
-        if (h2 < h) h = h2;
+        float v2 = g_joint_limits[J1_B_SERVO].max_deg_s;
         if (v2 < v) v = v2;
     }
 
@@ -222,47 +298,53 @@ float sensor_read_angle(int id)
 }
 
 // ===============================
-// SET SERVO ANGLE
+// SET SERVO ANGLE (master + follower)
 // ===============================
-void servo_set_angle(int servo_id, float angle) {
+void servo_set_angle(int servo_id, float angle)
+{
     if (servo_id < 0 || servo_id >= SERVO_COUNT) {
         ESP_LOGW(TAG, "Invalid servo ID: %d", servo_id);
         return;
     }
 
-    #define J1_A 1
-    #define J1_B 2
+    int master = servo_master(servo_id);
+    int other  = servo_follower(master);
 
-    int other = -1;
-    if (servo_id == J1_A) other = J1_B;
-    else if (servo_id == J1_B) other = J1_A;
+    // clamp pro master
+    float lo = g_joint_limits[master].min_deg;
+    float hi = g_joint_limits[master].max_deg;
 
-    float lo = g_joint_limits[servo_id].min_deg;
-    float hi = g_joint_limits[servo_id].max_deg;
-
-    if (other >= 0) {
-        if (g_joint_limits[other].min_deg > lo) lo = g_joint_limits[other].min_deg;
-        if (g_joint_limits[other].max_deg < hi) hi = g_joint_limits[other].max_deg;
+    if (master == J1_A_SERVO) {
+        j1_a_allowed_range(&lo, &hi);
     }
 
     angle = clampf(angle, lo, hi);
 
-    const uint32_t period_us = 1000000UL / SERVO_PWM_FREQ; // 20000us @50Hz
-    uint32_t pulse_us = (uint32_t)(SERVO_MIN_US + (SERVO_MAX_US - SERVO_MIN_US) * (angle / 180.0f));
+    // master pwm
+    uint32_t duty = angle_to_duty(angle);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[master].channel, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[master].channel);
+    s_last_q[master] = angle;
 
-    uint32_t duty = (pulse_us * 16384UL) / period_us;
-
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[servo_id].channel);
-
+    // follower pwm (J1_B)
     if (other >= 0) {
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[other].channel, duty);
+        float other_angle = j1_b_from_j1_a(angle);
+
+        // clamp follower separately
+        float lo2 = g_joint_limits[other].min_deg;
+        float hi2 = g_joint_limits[other].max_deg;
+        other_angle = clampf(other_angle, lo2, hi2);
+
+        uint32_t duty2 = angle_to_duty(other_angle);
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[other].channel, duty2);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[other].channel);
+
+        s_last_q[other] = other_angle;
     }
 }
 
 // ===============================
-// SET JOINT ANGLE (public API, 0..5)
+// SET JOINT ANGLE
 // ===============================
 void joint_set_angle(int joint_id, float angle)
 {
@@ -282,36 +364,35 @@ bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
 {
     bool ok = true;
 
-    {
-        float lo = g_joint_limits[J1_A_SERVO].min_deg;
-        float hi = g_joint_limits[J1_A_SERVO].max_deg;
-        if (g_joint_limits[J1_B_SERVO].min_deg > lo) lo = g_joint_limits[J1_B_SERVO].min_deg;
-        if (g_joint_limits[J1_B_SERVO].max_deg < hi) hi = g_joint_limits[J1_B_SERVO].max_deg;
-
-        if (q[J1_A_SERVO] < lo || q[J1_A_SERVO] > hi) ok = false;
-        if (clamp) q[J1_A_SERVO] = clampf(q[J1_A_SERVO], lo, hi);
-        q[J1_B_SERVO] = q[J1_A_SERVO];
-    }
-
     for (int i = 0; i < SERVO_COUNT; i++) {
         if (i == J1_B_SERVO) continue;
 
         float lo = g_joint_limits[i].min_deg;
         float hi = g_joint_limits[i].max_deg;
 
+        if (i == J1_A_SERVO) {
+            j1_a_allowed_range(&lo, &hi);
+        }
+
         if (q[i] < lo || q[i] > hi) ok = false;
         if (clamp) q[i] = clampf(q[i], lo, hi);
-
-        if (i == J1_A_SERVO) q[J1_B_SERVO] = q[J1_A_SERVO];
     }
 
+    float b = j1_b_from_j1_a(q[J1_A_SERVO]);
+    float blo = g_joint_limits[J1_B_SERVO].min_deg;
+    float bhi = g_joint_limits[J1_B_SERVO].max_deg;
+
+    if (b < blo || b > bhi) ok = false;
+    if (clamp) b = clampf(b, blo, bhi);
+
+    q[J1_B_SERVO] = b;
     return ok;
 }
 
 bool robot_xyz_reachable(float x, float y, float z)
 {
     float R = sqrtf(x*x + y*y);
-    float z_sh = L0 - z;
+    float z_sh = z - L0;
 
     float d = sqrtf(R*R + z_sh*z_sh);
 
@@ -349,7 +430,7 @@ void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
     float q0 = atan2f(y, x);
 
     float R    = sqrtf(x*x + y*y);
-    float z_sh = L0 - z;
+    float z_sh = z - L0;
     float d    = sqrtf(R*R + z_sh*z_sh);
 
     float cos_q2 = (d*d - L1*L1 - L2*L2) / (2.0f*L1*L2);
@@ -362,58 +443,44 @@ void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
     float psi = atan2f(L2*sinf(q2), L1 + L2*cosf(q2));
     float q1  = phi - psi;
 
-    for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = 90.0f;
+    // joint angles -> theoretical
+    float j0 = RAD2DEG(q0);
+    float j1 = RAD2DEG(q1);
+    float j2 = RAD2DEG(q2);
 
-    q_target[0]          = RAD2DEG(q0);
-    q_target[J1_A_SERVO] = RAD2DEG(q1);
-    q_target[J1_B_SERVO] = q_target[J1_A_SERVO];
-    q_target[3]          = RAD2DEG(q2);
-
-    robot_validate_and_prepare_q(q_target, true);
+    // mapping joint -> servo (offset)
+    q_target[0]          = map_servo(0, j0);
+    q_target[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
+    q_target[3]          = map_servo(3, j2);
 }
 
 // ===============================
 // MOVE TO POSITION (interpolated)
 // ===============================
-void move_to_position(float q_target[SERVO_COUNT])
-{
-    float q_current[SERVO_COUNT];
-    for (int i = 0; i < SERVO_COUNT; i++) q_current[i] = 90.0f;
+// void move_to_position(float q_target[SERVO_COUNT]) {
+//     float q_current[SERVO_COUNT];
+//     for (int i = 0; i < SERVO_COUNT; i++) {
+//         q_current[i] = s_last_q[i];
+//     }
 
-    for (int j = 0; j < JOINT_COUNT; j++) {
-        int si = s_joint_sensor_idx[j];
-        float a = (si >= 0 && si < SENSOR_COUNT) ? sensor_read_angle(si) : 90.0f;
-        if (a < 0) a = 90.0f;
+//     float max_diff = 0;
+//     for (int i = 0; i < SERVO_COUNT; i++) {
+//         float diff = fabsf(q_target[i] - q_current[i]);
+//         if (diff > max_diff) max_diff = diff;
+//     }
 
-        int s = s_joint_master_servo[j];
-        q_current[s] = a;
-        if (s == J1_A_SERVO) q_current[J1_B_SERVO] = a;
-    }
-
-    robot_validate_and_prepare_q(q_target, true);
-
-    float max_diff = 0;
-    for (int j = 0; j < JOINT_COUNT; j++) {
-        int s = s_joint_master_servo[j];
-        float diff = fabsf(q_target[s] - q_current[s]);
-        if (diff > max_diff) max_diff = diff;
-    }
-
-    int steps = INTERP_STEPS;
-    if (max_diff <= 0) return;
-
-    for (int k = 0; k <= steps; k++) {
-        float a = (float)k / (float)steps;
-
-        for (int j = 0; j < JOINT_COUNT; j++) {
-            int s = s_joint_master_servo[j];
-            float q = q_current[s] + (q_target[s] - q_current[s]) * a;
-            joint_set_angle(j, q);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(INTERP_DELAY_MS));
-    }
-}
+//     int steps = INTERP_STEPS;
+//     if (max_diff > 0) {
+//         for (int s = 0; s <= steps; s++) {
+//             for (int i = 0; i < SERVO_COUNT; i++) {
+//                 if (i == J1_B_SERVO) continue;
+//                 float q = q_current[i] + (q_target[i] - q_current[i]) * ((float)s / steps);
+//                 servo_set_angle(i, q);
+//             }
+//             vTaskDelay(pdMS_TO_TICKS(INTERP_DELAY_MS));
+//         }
+//     }
+// }
 
 // ===============================
 // SEGMENT BUFFER
@@ -474,7 +541,7 @@ static void robot_control_task(void *arg)
 
         int s = s_joint_master_servo[j];
         s_last_q[s] = a;
-        if (s == J1_A_SERVO) s_last_q[J1_B_SERVO] = a;
+        if (s == J1_A_SERVO) s_last_q[J1_B_SERVO] = j1_b_from_j1_a(a);
     }
 
     robot_cmd_t cmd;
@@ -506,7 +573,14 @@ static void robot_control_task(void *arg)
                     ESP_LOGW(TAG, "XYZ out of reach: x=%.1f y=%.1f z=%.1f", cmd.x, cmd.y, cmd.z);
                     continue;
                 }
+                for (int i = 0; i < SERVO_COUNT; i++) {
+                    seg.q1[i] = seg.q0[i];
+                }
+
                 inverse_kinematics(cmd.x, cmd.y, cmd.z, seg.q1);
+                ESP_LOGW(TAG, "IK q: s0=%.1f s1=%.1f s2=%.1f s3=%.1f",
+                        seg.q1[0], seg.q1[1], seg.q1[2], seg.q1[3]);
+
                 robot_validate_and_prepare_q(seg.q1, true);
                 seg.T = 1.0f;
             }

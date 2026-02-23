@@ -24,8 +24,7 @@ static void strip_comment(char *s)
 {
     // ';' comment
     char *c = strchr(s, ';');
-    if (c) *c = 0;
-    // trim \r\n
+    if (c) *c = 0;     // trim \r\n
     size_t n = strlen(s);
     while (n && (s[n-1]=='\n' || s[n-1]=='\r' || s[n-1]==' ' || s[n-1]=='\t')) s[--n]=0;
 }

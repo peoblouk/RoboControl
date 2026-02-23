@@ -43,7 +43,7 @@ typedef struct {
 // ===============================
 // FUNCTION PROTOTYPES
 // ===============================
-void wifi_servo_server_start(void);
+void wifi_server_start(void);
 void save_wifi_config(const char *ssid, const char *pass);
 bool load_wifi_config(char *ssid, size_t ssid_len, char *pass, size_t pass_len);
 void wifi_init_softap(void);

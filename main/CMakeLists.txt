@@ -1,7 +1,7 @@
 idf_component_register(
-                    SRCS "main.c" "robot_io/robot_io.c" "uart_receive/uart_receive.c" "wifi_server/wifi_server.c" "cmd_control/cmd_control.c" "rt_stats/rt_stats.c" "gcode/gcode.c"
+                    SRCS "main.c" "robot_io/robot_io.c" "wifi_server/wifi_server.c" "cmd_control/cmd_control.c" "rt_stats/rt_stats.c" "gcode/gcode.c"
 
-                    INCLUDE_DIRS "." "robot_io" "uart_receive" "wifi_server" "cmd_control" "rt_stats" "gcode"
+                    INCLUDE_DIRS "." "robot_io" "wifi_server" "cmd_control" "rt_stats" "gcode"
 
                     EMBED_TXTFILES "certs/servercert.pem"
                                     "certs/prvtkey.pem"

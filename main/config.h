@@ -25,8 +25,8 @@
 // ===============================
 // ROBOT: SERVO PWM
 // ===============================
-#define SERVO_MIN_US   500    // 0°  ~ 0.5 ms
-#define SERVO_MAX_US   2500   // 180° ~ 2.5 ms
+#define SERVO_MIN_US   900    // 0°  ~ 0.5 ms
+#define SERVO_MAX_US   2100   // 180° ~ 2.5 ms
 #define SERVO_PWM_FREQ 50     // 50 Hz = 20 ms period
 
 // ===============================
@@ -51,12 +51,10 @@
 // ===============================
 // ROBOT: ARM GEOMETRY (mm)
 // ===============================
-#define L0  82.0f
+#define L0  83.0f
 #define L1  112.5f
-#define L2  73.0f
-#define L3  0.0f
-#define L4  0.0f
-#define L5  0.0f
+#define L2  73.5f
+#define L_TOOL  115.0f
 
 // ===============================
 // ROBOT: JOINT LIMITS (deg / deg/s)
@@ -74,20 +72,16 @@
 #define J2_V   60
 
 #define J3_MIN 5
-#define J3_MAX 170 
+#define J3_MAX 170
 #define J3_V   60
 
 #define J4_MIN 8
 #define J4_MAX 175
 #define J4_V   90
 
-#define J5_MIN 43
-#define J5_MAX 170
+#define J5_MIN 0
+#define J5_MAX 80
 #define J5_V   90
-
-#define J6_MIN 20
-#define J6_MAX 80
-#define J6_V   90
 
 // ===============================
 // ROBOT: SERVO MAPPING (GPIO + LEDC)
@@ -154,12 +148,12 @@
 // Robot Positions
 // ===============================
 // HOME position
-#define HOME_J0 40
-#define HOME_J1 40   // J1 master+follower
-#define HOME_J2 30
-#define HOME_J3 30
-#define HOME_J4 30
-#define HOME_J5 20
+#define HOME_J0 90
+#define HOME_J1 75
+#define HOME_J2 80
+#define HOME_J3 120
+#define HOME_J4 60
+
 
 
 #endif // CONFIG_H

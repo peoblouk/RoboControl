@@ -16,7 +16,6 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include <stdbool.h>
-
 #include "gcode.h"
 
 // Radians / Degrees conversion
@@ -84,7 +83,10 @@ bool  robot_xyz_reachable(float x, float y, float z);
 float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_COUNT]);
 
 void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT]);
-void move_to_position(float q_target[SERVO_COUNT]);
+//void move_to_position(float q_target[SERVO_COUNT]);
+
+float robot_get_est_angle(int id);
+
 
 // Type of robot command
 typedef enum {
