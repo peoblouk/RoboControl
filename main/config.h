@@ -59,28 +59,28 @@
 // ===============================
 // ROBOT: JOINT LIMITS (deg / deg/s)
 // ===============================
-#define J0_MIN 23
+#define J0_MIN 0
 #define J0_MAX 180
 #define J0_V   60
 
-#define J1_MIN 27
-#define J1_MAX 173
+#define J1_MIN 0
+#define J1_MAX 180
 #define J1_V   60
 
-#define J2_MIN 15
-#define J2_MAX 175
+#define J2_MIN 0
+#define J2_MAX 180
 #define J2_V   60
 
-#define J3_MIN 5
-#define J3_MAX 170
+#define J3_MIN 0
+#define J3_MAX 180
 #define J3_V   60
 
-#define J4_MIN 8
-#define J4_MAX 175
+#define J4_MIN 0
+#define J4_MAX 180
 #define J4_V   90
 
 #define J5_MIN 0
-#define J5_MAX 80
+#define J5_MAX 150
 #define J5_V   90
 
 // ===============================

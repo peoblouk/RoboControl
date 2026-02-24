@@ -66,6 +66,7 @@ static traj_seg_t s_seg_buf[SEG_BUF_LEN];
 static int s_seg_w = 0, s_seg_r = 0;
 static traj_seg_t s_cur = {0};
 static float s_last_q[SERVO_COUNT] = {0};
+static volatile bool s_armed = true;
 
 static inline float clampf(float v, float lo, float hi) {
     if (v < lo) return lo;
@@ -320,6 +321,23 @@ void servo_set_angle(int servo_id, float angle)
 
     angle = clampf(angle, lo, hi);
 
+    if (!s_armed) {
+        ledc_stop(LEDC_LOW_SPEED_MODE, servos[master].channel, 0);
+        s_last_q[master] = angle;
+
+        if (other >= 0) {
+            float other_angle = j1_b_from_j1_a(angle);
+
+            float lo2 = g_joint_limits[other].min_deg;
+            float hi2 = g_joint_limits[other].max_deg;
+            other_angle = clampf(other_angle, lo2, hi2);
+
+            ledc_stop(LEDC_LOW_SPEED_MODE, servos[other].channel, 0);
+            s_last_q[other] = other_angle;
+        }
+        return;
+    }
+
     // master pwm
     uint32_t duty = angle_to_duty(angle);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[master].channel, duty);
@@ -455,34 +473,6 @@ void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
 }
 
 // ===============================
-// MOVE TO POSITION (interpolated)
-// ===============================
-// void move_to_position(float q_target[SERVO_COUNT]) {
-//     float q_current[SERVO_COUNT];
-//     for (int i = 0; i < SERVO_COUNT; i++) {
-//         q_current[i] = s_last_q[i];
-//     }
-
-//     float max_diff = 0;
-//     for (int i = 0; i < SERVO_COUNT; i++) {
-//         float diff = fabsf(q_target[i] - q_current[i]);
-//         if (diff > max_diff) max_diff = diff;
-//     }
-
-//     int steps = INTERP_STEPS;
-//     if (max_diff > 0) {
-//         for (int s = 0; s <= steps; s++) {
-//             for (int i = 0; i < SERVO_COUNT; i++) {
-//                 if (i == J1_B_SERVO) continue;
-//                 float q = q_current[i] + (q_target[i] - q_current[i]) * ((float)s / steps);
-//                 servo_set_angle(i, q);
-//             }
-//             vTaskDelay(pdMS_TO_TICKS(INTERP_DELAY_MS));
-//         }
-//     }
-// }
-
-// ===============================
 // SEGMENT BUFFER
 // ===============================
 static bool seg_full(void)  { return ((s_seg_w + 1) % SEG_BUF_LEN) == s_seg_r; }
@@ -526,6 +516,8 @@ static void apply_joints(const float q[SERVO_COUNT])
 // ===============================
 static void robot_control_task(void *arg)
 {
+    (void)arg;
+
     for (int i = 0; i < SERVO_COUNT; i++) s_last_q[i] = 90.0f;
 
     for (int j = 0; j < JOINT_COUNT; j++) {
@@ -545,8 +537,28 @@ static void robot_control_task(void *arg)
     }
 
     robot_cmd_t cmd;
+    static bool disarmed_latched = false;
 
     for (;;) {
+
+        if (!s_armed) {
+            if (!disarmed_latched) {
+                seg_flush();
+                for (int i = 0; i < SERVO_COUNT; i++) {
+                    ledc_stop(LEDC_LOW_SPEED_MODE, servos[i].channel, 0);
+                }
+                disarmed_latched = true;
+            }
+
+            while (xQueueReceive(s_robot_queue, &cmd, 0) == pdTRUE) {
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
+            continue;
+        }
+
+        disarmed_latched = false;
+
         if (xQueueReceive(s_robot_queue, &cmd, pdMS_TO_TICKS(EXEC_DT_MS)) == pdTRUE) {
 
             if (cmd.type == ROBOT_CMD_QUEUE_FLUSH) {
@@ -629,6 +641,26 @@ static void robot_control_task(void *arg)
     }
 }
 
+bool robot_is_armed(void)
+{
+    return s_armed;
+}
+
+void robot_disarm(void)
+{
+    s_armed = false;
+    robot_cmd_queue_flush();
+
+    for (int i = 0; i < SERVO_COUNT; i++) {
+        ledc_stop(LEDC_LOW_SPEED_MODE, servos[i].channel, 0);
+    }
+}
+
+void robot_arm(void)
+{
+    s_armed = true;
+}
+
 // ===============================
 // START ROBOT CONTROL
 // ===============================
@@ -646,6 +678,7 @@ void robot_control_start(void)
 
 bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
 {
+    if (!s_armed) return false;
     if (s_robot_queue == NULL) return false;
 
     robot_cmd_t cmd = {0};
@@ -657,6 +690,7 @@ bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
 
 bool robot_cmd_move_xyz(float x, float y, float z)
 {
+    if (!s_armed) return false;
     if (s_robot_queue == NULL) return false;
 
     robot_cmd_t cmd = {0};
@@ -668,6 +702,7 @@ bool robot_cmd_move_xyz(float x, float y, float z)
 
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout)
 {
+    if (!s_armed) return false;
     if (s_robot_queue == NULL) return false;
 
     robot_cmd_t cmd = {0};
@@ -706,6 +741,8 @@ static void gcode_executor_task(void *arg)
 
 void robot_core_run_gcode(const char *filename)
 {
+    if (!s_armed) return;
+
     gcode_task_params_t *params = malloc(sizeof(gcode_task_params_t));
     if (!params) {
         ESP_LOGE(TAG, "Failed to allocate memory for G-code task");

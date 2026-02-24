@@ -113,7 +113,10 @@ bool robot_cmd_move_joints(const float q_target[SERVO_COUNT]);
 bool robot_cmd_move_xyz(float x, float y, float z);
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout);
 void robot_cmd_queue_flush(void);
-
 void robot_core_run_gcode(const char *filename);
+
+void robot_disarm(void);
+void robot_arm(void);
+bool robot_is_armed(void);
 
 #endif // ROBOT_IO

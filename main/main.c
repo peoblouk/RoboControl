@@ -60,3 +60,4 @@ static void init_spiffs(void) {
     esp_spiffs_info(NULL, &total, &used);
     ESP_LOGI("SPIFFS", "Partition size: total: %d, used: %d", total, used);
 }
+

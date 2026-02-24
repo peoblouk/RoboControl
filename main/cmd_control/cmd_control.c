@@ -339,6 +339,21 @@ static int cmd_test(int argc, char **argv)
 }
 
 /////
+static int cmd_disarm(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    robot_disarm();
+    printf("OK: disarmed\n");
+    return 0;
+}
+
+static int cmd_arm(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    robot_arm();
+    printf("OK: armed\n");
+    return 0;
+}
 
 static int cmd_home(int argc, char **argv)
 {
@@ -443,6 +458,25 @@ static void register_commands(void)
     .argtable = NULL,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&gcode_cmd));
+
+
+        const esp_console_cmd_t disarm_cmd = {
+        .command  = "disarm",
+        .help     = "Disable servo PWM outputs",
+        .hint     = NULL,
+        .func     = &cmd_disarm,
+        .argtable = NULL,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&disarm_cmd));
+
+    const esp_console_cmd_t arm_cmd = {
+        .command  = "arm",
+        .help     = "Enable servo PWM outputs",
+        .hint     = NULL,
+        .func     = &cmd_arm,
+        .argtable = NULL,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&arm_cmd));
 
     const esp_console_cmd_t home_cmd = {
         .command  = "home",
