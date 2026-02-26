@@ -339,6 +339,33 @@ static int cmd_test(int argc, char **argv)
 }
 
 /////
+// static int cmd_pwm(int argc, char **argv)
+// {
+//     if (argc == 1) {
+//         for (int i = 0; i < SERVO_COUNT; i++) {
+//             int mn = 0, mx = 0;
+//             servo_pwm_get_range_us(i, &mn, &mx);
+//             printf("servo %d: %d..%d us\n", i, mn, mx);
+//         }
+//         return 0;
+//     }
+
+//     if (argc != 4) {
+//         printf("Usage: pwm [servo_id min_us max_us]\n");
+//         printf("  pwm                 -> print all\n");
+//         printf("  pwm <id> <min> <max> -> set range\n");
+//         return 0;
+//     }
+
+//     int id = atoi(argv[1]);
+//     int mn = atoi(argv[2]);
+//     int mx = atoi(argv[3]);
+
+//     bool ok = servo_pwm_set_range_us(id, mn, mx);
+//     printf(ok ? "OK\n" : "ERR\n");
+//     return 0;
+// }
+/////
 static int cmd_disarm(int argc, char **argv)
 {
     (void)argc; (void)argv;
@@ -459,8 +486,16 @@ static void register_commands(void)
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&gcode_cmd));
 
+    // const esp_console_cmd_t pwm_cmd = {
+    //     .command  = "pwm",
+    //     .help     = "Servo PWM range: pwm [servo_id min_us max_us]",
+    //     .hint     = NULL,
+    //     .func     = &cmd_pwm,
+    //     .argtable = NULL,
+    // };
+    // ESP_ERROR_CHECK(esp_console_cmd_register(&pwm_cmd));
 
-        const esp_console_cmd_t disarm_cmd = {
+    const esp_console_cmd_t disarm_cmd = {
         .command  = "disarm",
         .help     = "Disable servo PWM outputs",
         .hint     = NULL,

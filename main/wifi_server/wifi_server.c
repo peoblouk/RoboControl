@@ -90,7 +90,7 @@ static esp_err_t icon_get_handler(httpd_req_t *req) {
     if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
 
     httpd_resp_set_type(req, "image/x-icon");
-    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=2592000"); // cache
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=2592000");
 
     char buf[512];
     size_t r;
@@ -170,6 +170,10 @@ static void ws_broadcast(const char *msg) {
     xSemaphoreGive(g_ws_lock);
 }
 
+static inline const char *robot_state_str_(void) {
+    return robot_is_armed() ? "IDLE" : "DISARMED";
+}
+
 static esp_err_t ws_handler(httpd_req_t *req) {
     if (req->method == HTTP_GET) {
         int fd = httpd_req_to_sockfd(req);
@@ -190,8 +194,6 @@ static esp_err_t ws_handler(httpd_req_t *req) {
         return ESP_OK;
     }
 
-    if (frame.len == 0) return ESP_FAIL;
-
     frame.payload = malloc(frame.len + 1);
     if (!frame.payload) return ESP_ERR_NO_MEM;
 
@@ -202,6 +204,7 @@ static esp_err_t ws_handler(httpd_req_t *req) {
     if (json) {
         cJSON *joint = cJSON_GetObjectItem(json, "joint");
         cJSON *angle = cJSON_GetObjectItem(json, "angle");
+
         if (cJSON_IsNumber(joint) && cJSON_IsNumber(angle)) {
             int jid = joint->valueint;
             float a = (float)angle->valuedouble;
@@ -233,17 +236,18 @@ static esp_err_t ws_handler(httpd_req_t *req) {
         // ===============================
         cJSON *cmd = cJSON_GetObjectItem(json, "cmd");
 
-        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"sensors")==0) {
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "sensors") == 0) {
             cJSON *root = cJSON_CreateObject();
-            cJSON *arr  = cJSON_AddArrayToObject(root,"sensors");
+            cJSON_AddStringToObject(root, "state", robot_state_str_());
+            cJSON *arr  = cJSON_AddArrayToObject(root, "sensors");
 
             static const int joint_to_servo[6] = { 0, 1, 3, 4, 5, 6 };
 
-            for (int i=0; i<6; i++) {
+            for (int i = 0; i < 6; i++) {
                 cJSON *o = cJSON_CreateObject();
-                cJSON_AddNumberToObject(o,"id",i);
-                cJSON_AddNumberToObject(o,"angle",robot_get_est_angle(joint_to_servo[i]));
-                cJSON_AddItemToArray(arr,o);
+                cJSON_AddNumberToObject(o, "id", i);
+                cJSON_AddNumberToObject(o, "angle", robot_get_est_angle(joint_to_servo[i]));
+                cJSON_AddItemToArray(arr, o);
             }
             char *out = cJSON_PrintUnformatted(root);
             ws_send_to(httpd_req_to_sockfd(req), out);
@@ -251,7 +255,7 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             cJSON_Delete(root);
         }
 
-        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"move_xyz") == 0) {
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "move_xyz") == 0) {
             cJSON *jx = cJSON_GetObjectItem(json, "x");
             cJSON *jy = cJSON_GetObjectItem(json, "y");
             cJSON *jz = cJSON_GetObjectItem(json, "z");
@@ -272,14 +276,14 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             }
         }
 
-        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"gcode_line") == 0) {
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "gcode_line") == 0) {
             cJSON *jl = cJSON_GetObjectItem(json, "line");
             int fd = httpd_req_to_sockfd(req);
 
             if (cJSON_IsString(jl)) {
                 bool ok = gcode_push_line(jl->valuestring);
                 ws_send_to(fd, ok ? "{\"status\":\"ok\",\"cmd\":\"gcode_line\"}"
-                                : "{\"status\":\"err\",\"cmd\":\"gcode_line\"}");
+                                 : "{\"status\":\"err\",\"cmd\":\"gcode_line\"}");
             }
         }
 
@@ -295,7 +299,20 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             }
         }
 
-        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring,"gcode_stop") == 0) {
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "disarm") == 0) {
+            int fd = httpd_req_to_sockfd(req);
+            gcode_stop();
+            robot_disarm();
+            ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"disarm\",\"state\":\"DISARMED\"}");
+        }
+
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "arm") == 0) {
+            int fd = httpd_req_to_sockfd(req);
+            robot_arm();
+            ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"arm\",\"state\":\"IDLE\"}");
+        }
+
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "gcode_stop") == 0) {
             int fd = httpd_req_to_sockfd(req);
             gcode_stop();
             ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"gcode_stop\"}");
@@ -309,22 +326,25 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 }
 
 static void ws_task_sensors(void *arg) {
+    (void)arg;
     for (;;) {
         cJSON *root = cJSON_CreateObject();
-        cJSON *arr  = cJSON_AddArrayToObject(root,"sensors");
+        cJSON_AddStringToObject(root, "state", robot_state_str_());
+        cJSON *arr  = cJSON_AddArrayToObject(root, "sensors");
 
         static const int joint_to_servo[6] = { 0, 1, 3, 4, 5, 6 };
 
-        for (int i=0;i<6;i++) {
+        for (int i = 0; i < 6; i++) {
             cJSON *o = cJSON_CreateObject();
-            cJSON_AddNumberToObject(o,"id",i);
-            cJSON_AddNumberToObject(o,"angle",robot_get_est_angle(joint_to_servo[i]));
-            cJSON_AddItemToArray(arr,o);
+            cJSON_AddNumberToObject(o, "id", i);
+            cJSON_AddNumberToObject(o, "angle", robot_get_est_angle(joint_to_servo[i]));
+            cJSON_AddItemToArray(arr, o);
         }
         char *out = cJSON_PrintUnformatted(root);
         ws_broadcast(out);
         free(out);
         cJSON_Delete(root);
+
         vTaskDelay(pdMS_TO_TICKS(WS_SENSORS_PERIOD_MS));
     }
 }
@@ -480,13 +500,12 @@ static esp_err_t upload_post_handler(httpd_req_t *req) {
     httpd_resp_sendstr(req, "File uploaded successfully!");
     return ESP_OK;
 }
+
 // ===============================
 // JOINT LIMITS (from config.h)
 // ===============================
-
 static esp_err_t limits_get_handler(httpd_req_t *req)
 {
-    // joint limits from config.h (J0_MIN, J0_MAX, J0_V, ...)
     char resp[512];
     int n = snprintf(resp, sizeof(resp),
         "{"
@@ -610,7 +629,7 @@ static httpd_handle_t start_webserver(void) {
         { "/settings", HTTP_GET, settings_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/web/style.css", HTTP_GET, style_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/web/robocontrol.ico", HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
-        { "/favicon.ico",               HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
+        { "/favicon.ico", HTTP_GET, icon_get_handler, NULL, .is_websocket=false, .handle_ws_control_frames=false },
         { "/wifi_reset", HTTP_POST, wifi_reset_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/wifi_config", HTTP_ANY, wifi_config_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },
         { "/api/limits", HTTP_GET, limits_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false },

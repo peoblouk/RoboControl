@@ -12,16 +12,8 @@ static const char *TAG = "robot_io";
 static adc_oneshot_unit_handle_t s_adc1 = NULL;
 static adc_oneshot_unit_handle_t s_adc2 = NULL;
 
-#define J1_A_SERVO 1
-#define J1_B_SERVO 2
 
-#define JOINT0_SERVO 0
-#define JOINT1_SERVO J1_A_SERVO
-#define JOINT2_SERVO 3
-#define JOINT3_SERVO 4
-#define JOINT4_SERVO 5
-#define JOINT5_SERVO 6
-
+#define SERVO_DUTY_MAX ((1U << 14) - 1)   // timer is LEDC_TIMER_14_BIT
 static const int s_joint_master_servo[JOINT_COUNT] = {
     JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
 };
@@ -90,62 +82,54 @@ float robot_get_est_angle(int id)
 }
 
 // ===============================
-// SERVO/KINEMATICS MAPPING
+// SERVO PWM RANGES (per-servo, runtime adjustable)
 // ===============================
-static float OFF[SERVO_COUNT] = {90, 90, 90, 90, 90, 90, 90};
-static float DIR[SERVO_COUNT] = {+1, -1, +1, +1, +1, +1, +1};
+static servo_pwm_range_t s_servo_pwm[SERVO_COUNT] = SERVO_PWM_RANGES_INIT;
+static portMUX_TYPE s_pwm_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static inline float map_servo(int sid, float joint_deg_math) {
-    return OFF[sid] + DIR[sid] * joint_deg_math;
-}
-
-// --- J1 follower behavior ---
-#define J1_FOLLOWER_INVERT   0       // 1 = J1_B is inverted copy of J1_A, 0 = direct copy with trim
-#define J1_B_TRIM_DEG        +0.0f    // correction angle
-
-static inline float j1_b_from_j1_a(float a_deg)
+bool servo_pwm_set_range_us(int servo_id, int min_us, int max_us)
 {
-#if J1_FOLLOWER_INVERT
-    return 180.0f - a_deg + J1_B_TRIM_DEG;
-#else
-    return a_deg + J1_B_TRIM_DEG;
-#endif
+    if (servo_id < 0 || servo_id >= SERVO_COUNT) return false;
+    if (min_us < 0 || max_us < 0) return false;
+    if (min_us >= max_us) return false;
+
+    const int period_us = (int)lroundf(1000000.0f / (float)SERVO_PWM_FREQ);
+    if (min_us > period_us || max_us > period_us) return false;
+
+    portENTER_CRITICAL(&s_pwm_mux);
+    s_servo_pwm[servo_id].min_us = (uint16_t)min_us;
+    s_servo_pwm[servo_id].max_us = (uint16_t)max_us;
+    portEXIT_CRITICAL(&s_pwm_mux);
+    return true;
 }
 
-static inline void j1_a_allowed_range(float *lo, float *hi)
+void servo_pwm_get_range_us(int servo_id, int *min_us, int *max_us)
 {
-    float a_lo = g_joint_limits[J1_A_SERVO].min_deg;
-    float a_hi = g_joint_limits[J1_A_SERVO].max_deg;
+    if (min_us) *min_us = 0;
+    if (max_us) *max_us = 0;
+    if (servo_id < 0 || servo_id >= SERVO_COUNT) return;
 
-    const float b_lo = g_joint_limits[J1_B_SERVO].min_deg;
-    const float b_hi = g_joint_limits[J1_B_SERVO].max_deg;
+    portENTER_CRITICAL(&s_pwm_mux);
+    uint16_t mn = s_servo_pwm[servo_id].min_us;
+    uint16_t mx = s_servo_pwm[servo_id].max_us;
+    portEXIT_CRITICAL(&s_pwm_mux);
 
-#if J1_FOLLOWER_INVERT
-    // b = 180 - a + trim  =>  a = 180 + trim - b
-    const float a_from_b_lo = 180.0f + J1_B_TRIM_DEG - b_hi;
-    const float a_from_b_hi = 180.0f + J1_B_TRIM_DEG - b_lo;
-#else
-    // b = a + trim => a = b - trim
-    const float a_from_b_lo = b_lo - J1_B_TRIM_DEG;
-    const float a_from_b_hi = b_hi - J1_B_TRIM_DEG;
-#endif
-
-    if (a_from_b_lo > a_lo) a_lo = a_from_b_lo;
-    if (a_from_b_hi < a_hi) a_hi = a_from_b_hi;
-
-    *lo = a_lo;
-    *hi = a_hi;
+    if (min_us) *min_us = (int)mn;
+    if (max_us) *max_us = (int)mx;
 }
 
-// --- angle->duty using your config ranges ---
-#define SERVO_DUTY_MAX ((1U << 14) - 1)   // timer is LEDC_TIMER_14_BIT
-
-static inline uint32_t angle_to_duty(float angle_deg)
+static inline uint32_t angle_to_duty(int servo_id, float angle_deg)
 {
     const float period_us = 1000000.0f / (float)SERVO_PWM_FREQ;
 
-    const float duty_min_f = ((float)SERVO_MIN_US / period_us) * (float)SERVO_DUTY_MAX;
-    const float duty_max_f = ((float)SERVO_MAX_US / period_us) * (float)SERVO_DUTY_MAX;
+    uint16_t mn, mx;
+    portENTER_CRITICAL(&s_pwm_mux);
+    mn = s_servo_pwm[servo_id].min_us;
+    mx = s_servo_pwm[servo_id].max_us;
+    portEXIT_CRITICAL(&s_pwm_mux);
+
+    const float duty_min_f = ((float)mn / period_us) * (float)SERVO_DUTY_MAX;
+    const float duty_max_f = ((float)mx / period_us) * (float)SERVO_DUTY_MAX;
 
     float t = angle_deg / 180.0f;
     if (t < 0) t = 0;
@@ -156,6 +140,41 @@ static inline uint32_t angle_to_duty(float angle_deg)
     if (duty_f > (float)SERVO_DUTY_MAX) duty_f = (float)SERVO_DUTY_MAX;
 
     return (uint32_t)(duty_f + 0.5f);
+}
+
+// ===============================
+// SERVO/KINEMATICS MAPPING
+// ===============================
+static float OFF[SERVO_COUNT] = SERVO_OFF_INIT;
+static float DIR[SERVO_COUNT] = SERVO_DIR_INIT;
+
+static inline float map_servo(int sid, float joint_deg_math)
+{
+    return OFF[sid] + DIR[sid] * joint_deg_math;
+}
+
+static inline float j1_b_from_j1_a(float a_deg)
+{
+    return a_deg + J1_B_TRIM_DEG;
+}
+
+static inline void j1_a_allowed_range(float *lo, float *hi)
+{
+    float a_lo = g_joint_limits[J1_A_SERVO].min_deg;
+    float a_hi = g_joint_limits[J1_A_SERVO].max_deg;
+
+    const float b_lo = g_joint_limits[J1_B_SERVO].min_deg;
+    const float b_hi = g_joint_limits[J1_B_SERVO].max_deg;
+
+    // b = a + trim => a = b - trim
+    const float a_from_b_lo = b_lo - J1_B_TRIM_DEG;
+    const float a_from_b_hi = b_hi - J1_B_TRIM_DEG;
+
+    if (a_from_b_lo > a_lo) a_lo = a_from_b_lo;
+    if (a_from_b_hi < a_hi) a_hi = a_from_b_hi;
+
+    *lo = a_lo;
+    *hi = a_hi;
 }
 
 // ===============================
@@ -339,7 +358,7 @@ void servo_set_angle(int servo_id, float angle)
     }
 
     // master pwm
-    uint32_t duty = angle_to_duty(angle);
+    uint32_t duty = angle_to_duty(master, angle);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[master].channel, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[master].channel);
     s_last_q[master] = angle;
@@ -353,7 +372,7 @@ void servo_set_angle(int servo_id, float angle)
         float hi2 = g_joint_limits[other].max_deg;
         other_angle = clampf(other_angle, lo2, hi2);
 
-        uint32_t duty2 = angle_to_duty(other_angle);
+        uint32_t duty2 = angle_to_duty(other, other_angle);
         ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[other].channel, duty2);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[other].channel);
 

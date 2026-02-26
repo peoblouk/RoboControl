@@ -19,15 +19,105 @@
 // ===============================
 // ROBOT: COUNTS
 // ===============================
-#define SERVO_COUNT          7
-#define SENSOR_COUNT         6
+#define SERVO_COUNT   7
+#define SENSOR_COUNT  6
+#define JOINT_COUNT   6
+
+// ===============================
+// ROBOT: SERVO / JOINT IDs
+// ===============================
+// Servo IDs (indexy do servos[] / s_servo_pwm[] / OFF[] / DIR[])
+#define SERVO_J0      0
+#define SERVO_J1_A    1
+#define SERVO_J1_B    2   // follower
+#define SERVO_J2      3
+#define SERVO_J3      4
+#define SERVO_J4      5
+#define SERVO_J5      6   // gripper
+
+// Kompatibilita se starými názvy
+#define J1_A_SERVO    SERVO_J1_A
+#define J1_B_SERVO    SERVO_J1_B
+
+// Joint -> master servo mapping (indexy jointů jsou 0..JOINT_COUNT-1)
+#define JOINT0_SERVO  SERVO_J0
+#define JOINT1_SERVO  SERVO_J1_A
+#define JOINT2_SERVO  SERVO_J2
+#define JOINT3_SERVO  SERVO_J3
+#define JOINT4_SERVO  SERVO_J4
+#define JOINT5_SERVO  SERVO_J5
 
 // ===============================
 // ROBOT: SERVO PWM
 // ===============================
-#define SERVO_MIN_US   900    // 0°  ~ 0.5 ms
-#define SERVO_MAX_US   2100   // 180° ~ 2.5 ms
 #define SERVO_PWM_FREQ 50     // 50 Hz = 20 ms period
+
+// PWM range (µs) — 0° => MIN, 180° => MAX
+#define SERVO0_MIN_US  700
+#define SERVO0_MAX_US  2300
+
+#define SERVO1_MIN_US  850
+#define SERVO1_MAX_US  2300
+
+#define SERVO2_MIN_US  850
+#define SERVO2_MAX_US  2300
+
+#define SERVO3_MIN_US  750
+#define SERVO3_MAX_US  2350
+
+#define SERVO4_MIN_US  650
+#define SERVO4_MAX_US  2400
+
+#define SERVO5_MIN_US  1000
+#define SERVO5_MAX_US  2300
+
+#define SERVO6_MIN_US  720
+#define SERVO6_MAX_US  1700
+
+#define SERVO_PWM_RANGES_INIT { \
+    { SERVO0_MIN_US, SERVO0_MAX_US }, \
+    { SERVO1_MIN_US, SERVO1_MAX_US }, \
+    { SERVO2_MIN_US, SERVO2_MAX_US }, \
+    { SERVO3_MIN_US, SERVO3_MAX_US }, \
+    { SERVO4_MIN_US, SERVO4_MAX_US }, \
+    { SERVO5_MIN_US, SERVO5_MAX_US }, \
+    { SERVO6_MIN_US, SERVO6_MAX_US }, \
+}
+
+// ===============================
+// ROBOT: SERVO MAPPING (OFF / DIR)
+// ===============================
+// joint_deg_math -> servo_deg = OFF + DIR * joint_deg_math
+#define SERVO0_OFF_DEG  70.0f
+#define SERVO1_OFF_DEG  180.0f
+#define SERVO2_OFF_DEG  180.0f
+#define SERVO3_OFF_DEG  150.0f
+#define SERVO4_OFF_DEG  70.0f
+#define SERVO5_OFF_DEG  60.0f
+#define SERVO6_OFF_DEG  90.0f
+
+#define SERVO0_DIR      +1.0f
+#define SERVO1_DIR      +1.0f
+#define SERVO2_DIR      -1.0f
+#define SERVO3_DIR      +1.0f
+#define SERVO4_DIR      -1.0f
+#define SERVO5_DIR      +1.0f
+#define SERVO6_DIR      +1.0f
+
+#define SERVO_OFF_INIT { \
+    SERVO0_OFF_DEG, SERVO1_OFF_DEG, SERVO2_OFF_DEG, \
+    SERVO3_OFF_DEG, SERVO4_OFF_DEG, SERVO5_OFF_DEG, SERVO6_OFF_DEG \
+}
+
+#define SERVO_DIR_INIT { \
+    SERVO0_DIR, SERVO1_DIR, SERVO2_DIR, \
+    SERVO3_DIR, SERVO4_DIR, SERVO5_DIR, SERVO6_DIR \
+}
+
+// ===============================
+// ROBOT: J1 FOLLOWER
+// ===============================
+#define J1_B_TRIM_DEG        -0.5f
 
 // ===============================
 // ROBOT: EXECUTOR / TIMING
@@ -80,7 +170,7 @@
 #define J4_V   90
 
 #define J5_MIN 0
-#define J5_MAX 150
+#define J5_MAX 90
 #define J5_V   90
 
 // ===============================
@@ -147,13 +237,12 @@
 // ===============================
 // Robot Positions
 // ===============================
-// HOME position
-#define HOME_J0 90
+#define HOME_J0 75
 #define HOME_J1 75
-#define HOME_J2 80
+#define HOME_J2 30
 #define HOME_J3 120
-#define HOME_J4 60
-
-
+#define HOME_J4 90
+#define HOME_J5 90
+#define HOME_J6 90
 
 #endif // CONFIG_H

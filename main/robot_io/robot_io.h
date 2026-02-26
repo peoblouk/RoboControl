@@ -22,7 +22,6 @@
 #define RAD2DEG(x) ((x) * 180.0f / M_PI)
 #define DEG2RAD(x) ((x) * M_PI / 180.0f)
 
-#define JOINT_COUNT 6
 
 // ===============================
 // SERVO CONFIGURATION (PWM output)
@@ -31,6 +30,11 @@ typedef struct {
     ledc_channel_t channel;
     gpio_num_t gpio_num;
 } servo_t;
+
+typedef struct {
+    uint16_t min_us;
+    uint16_t max_us;
+} servo_pwm_range_t;
 
 extern servo_t servos[SERVO_COUNT];
 

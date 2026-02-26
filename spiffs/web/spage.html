@@ -19,18 +19,9 @@
       const jointDirty = Array(6).fill(false);
       const jointTarget = Array(6).fill(null);
 
-      function clearDirty(jid) {
-        jointDirty[jid] = false;
-        jointTarget[jid] = null;
-      }
-
-      function clearAllDirty() {
-        for (let i = 0; i < 6; i++) clearDirty(i);
-      }
-
       const editingJoints = new Set();
-
       const jointEditUntil = Array(6).fill(0);
+
       function lockJoint(jid, ms = 800) {
         jointEditUntil[jid] = Date.now() + ms;
       }
@@ -53,6 +44,31 @@
         return v;
       }
 
+      function isGripper(jid) {
+        return Number(jid) === 5;
+      }
+
+      function getJointLimit(jid) {
+        if (!limits) return null;
+        return limits.joints.find((j) => Number(j.id) === Number(jid)) || null;
+      }
+
+      function jointRange(jid) {
+        if (isGripper(jid)) return { lo: 0, hi: 90 };
+        const lim = getJointLimit(jid);
+        if (lim) return { lo: Number(lim.min), hi: Number(lim.max) };
+        return { lo: 0, hi: 180 };
+      }
+
+      function clearDirty(jid) {
+        jointDirty[jid] = false;
+        jointTarget[jid] = null;
+      }
+
+      function clearAllDirty() {
+        for (let i = 0; i < 6; i++) clearDirty(i);
+      }
+
       function setWifiUI(online) {
         const dot = document.getElementById("wifi-dot");
         const txt = document.getElementById("wifi-state");
@@ -70,8 +86,8 @@
 
         if (state === "IDLE") elDot.style.background = "#fbbf24";
         else if (state === "RUNNING") elDot.style.background = "#22c55e";
+        else if (state === "DISARMED") elDot.style.background = "#ef4444";
         else if (state === "ALARM" || state === "ERROR") elDot.style.background = "#ef4444";
-        else if (state === "STOPPED") elDot.style.background = "#ef4444";
         else elDot.style.background = "#888";
       }
 
@@ -85,33 +101,23 @@
           applyLimitsToSliders();
         } catch (e) {
           limits = null;
+          applyLimitsToSliders();
         }
-      }
-
-      function getJointLimit(jid) {
-        if (!limits) return null;
-        return limits.joints.find((j) => Number(j.id) === Number(jid)) || null;
       }
 
       function applyLimitsToSliders() {
         for (let jid = 0; jid < 6; jid++) {
-          const lim = getJointLimit(jid);
           const input = document.getElementById(`joint-${jid}`);
           const targetEl = document.getElementById(`joint-value-${jid}`);
           if (!input || !targetEl) continue;
 
-          if (lim) {
-            input.min = lim.min;
-            input.max = lim.max;
-            input.step = "1";
-          } else {
-            input.min = "0";
-            input.max = "180";
-            input.step = "1";
-          }
+          const r = jointRange(jid);
+          input.min = r.lo;
+          input.max = r.hi;
+          input.step = "1";
 
-          const lo = Number(input.min || 0);
-          const hi = Number(input.max || 180);
+          const lo = r.lo;
+          const hi = r.hi;
 
           if (jointDirty[jid] && jointTarget[jid] != null) {
             jointTarget[jid] = clamp(jointTarget[jid], lo, hi);
@@ -192,22 +198,21 @@
             data.sensors.forEach((s) => {
               const jid = Number(s.id);
               const ang = Number(s.angle);
+              if (Number.isNaN(jid) || Number.isNaN(ang)) return;
 
               const g = document.querySelector(`.gauge[data-id="${jid}"]`);
               if (g) updateGauge(g, ang);
-
-              if (Number.isNaN(jid) || Number.isNaN(ang)) return;
 
               const input = document.getElementById(`joint-${jid}`);
               const targetEl = document.getElementById(`joint-value-${jid}`);
               const actEl = document.getElementById(`joint-act-${jid}`);
               if (!input || !targetEl || !actEl) return;
 
-              const lim = getJointLimit(jid);
-              const lo = lim ? lim.min : Number(input.min || 0);
-              const hi = lim ? lim.max : Number(input.max || 180);
-              const actual = clamp(ang, lo, hi);
+              const r = jointRange(jid);
+              const lo = r.lo;
+              const hi = r.hi;
 
+              const actual = clamp(ang, lo, hi);
               actEl.textContent = `${actual.toFixed(0)}°`;
 
               const focused = document.activeElement === input;
@@ -246,9 +251,9 @@
         const targetEl = document.getElementById(`joint-value-${jointId}`);
         if (!input || !targetEl) return;
 
-        const lim = getJointLimit(jointId);
-        const lo = lim ? lim.min : Number(input.min || 0);
-        const hi = lim ? lim.max : Number(input.max || 180);
+        const r = jointRange(jointId);
+        const lo = r.lo;
+        const hi = r.hi;
 
         const v = clamp(input.value, lo, hi);
         input.value = v;
@@ -269,9 +274,9 @@
         const targetEl = document.getElementById(`joint-value-${jointId}`);
         if (!input || !targetEl) return;
 
-        const lim = getJointLimit(jointId);
-        const lo = lim ? lim.min : Number(input.min || 0);
-        const hi = lim ? lim.max : Number(input.max || 180);
+        const r = jointRange(jointId);
+        const lo = r.lo;
+        const hi = r.hi;
 
         const v = clamp(input.value, lo, hi);
         input.value = v;
@@ -350,6 +355,12 @@
         input.value = "";
       }
 
+      function stopGcode() {
+        if (!ws || ws.readyState !== 1) return;
+        ws.send(JSON.stringify({ cmd: "gcode_stop" }));
+        ws.send(JSON.stringify({ cmd: "sensors" }));
+      }
+
       function runFile(filename) {
         if (!ws || ws.readyState !== 1) {
           alert("WebSocket not connected.");
@@ -357,13 +368,20 @@
         }
         if (!confirm(`Run program "${filename}"?`)) return;
         ws.send(JSON.stringify({ cmd: "run_gcode", filename: filename }));
-        alert("Send.");
       }
 
-      function stopRobot() {
+      function disarmRobot() {
         if (!ws || ws.readyState !== 1) return;
-        ws.send(JSON.stringify({ cmd: "gcode_stop" }));
-        setRobotUI("STOPPED");
+        ws.send(JSON.stringify({ cmd: "disarm" }));
+        ws.send(JSON.stringify({ cmd: "sensors" }));
+        setRobotUI("DISARMED");
+      }
+
+      function armRobot() {
+        if (!ws || ws.readyState !== 1) return;
+        ws.send(JSON.stringify({ cmd: "arm" }));
+        ws.send(JSON.stringify({ cmd: "sensors" }));
+        setRobotUI("IDLE");
       }
 
       async function uploadFile() {
@@ -492,8 +510,11 @@
         const value = el.querySelector(".gauge-value");
         if (!fill || !value) return;
 
-        const clamped = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, Number(angle)));
-        const percent = clamped / GAUGE_MAX;
+        const jid = Number(el.dataset.id);
+        const gMax = isGripper(jid) ? 90 : GAUGE_MAX;
+
+        const clamped = Math.max(GAUGE_MIN, Math.min(gMax, Number(angle)));
+        const percent = clamped / gMax;
         const dash = 126 * (1 - percent);
 
         fill.style.strokeDashoffset = dash;
@@ -522,9 +543,9 @@
     <div class="navbar">
       <h2><a href="/" style="text-decoration: none; color: white">RoboControl</a></h2>
 
-      <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap; justify-content: center">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center">
         <button
-          onclick="stopRobot()"
+          onclick="disarmRobot()"
           style="
             background: #dc2626;
             color: white;
@@ -536,7 +557,23 @@
             cursor: pointer;
           "
         >
-          STOP
+          DISARM
+        </button>
+
+        <button
+          onclick="armRobot()"
+          style="
+            background: #22c55e;
+            color: white;
+            font-weight: bold;
+            padding: 5px 15px;
+            border: 2px solid #16a34a;
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+          "
+        >
+          ARM
         </button>
 
         <div class="status">
@@ -586,6 +623,7 @@
               onkeydown="if (event.key === 'Enter') sendGcodeLine();"
             />
             <button style="width: auto" onclick="sendGcodeLine()">Send</button>
+            <button style="width: auto; background: #dc2626" onclick="stopGcode()">STOP_GCODE</button>
           </div>
         </div>
       </div>
@@ -661,8 +699,8 @@
                 <span class="joint-act" id="joint-act-5">--°</span>
               </label>
               <div class="joint-line">
-                <input type="range" value="90" id="joint-5" oninput="setJointUI(5)" />
-                <span class="joint-target" id="joint-value-5">90°</span>
+                <input type="range" value="45" id="joint-5" oninput="setJointUI(5)" />
+                <span class="joint-target" id="joint-value-5">45°</span>
                 <button onclick="setJoint(5)">Set</button>
               </div>
             </div>

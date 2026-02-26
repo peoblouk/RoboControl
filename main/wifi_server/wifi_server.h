@@ -37,7 +37,7 @@ typedef struct {
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "robot_io.h"  // Robot IO (servos, sensors)
-#include "gcode.h"    // G-code interpreter
+#include "gcode.h"     // G-code interpreter
 
 
 // ===============================
