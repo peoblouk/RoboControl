@@ -22,6 +22,10 @@
       const editingJoints = new Set();
       const jointEditUntil = Array(6).fill(0);
 
+      const PITCH_MIN = -90;
+      const PITCH_MAX = 90;
+      const PITCH_DEFAULT = 20;
+
       function lockJoint(jid, ms = 800) {
         jointEditUntil[jid] = Date.now() + ms;
       }
@@ -320,6 +324,21 @@
         }, 300);
       }
 
+      function getPitchDeg() {
+        const el = document.getElementById("pitch");
+        const v = el ? Number(el.value) : PITCH_DEFAULT;
+        return clamp(v, PITCH_MIN, PITCH_MAX);
+      }
+
+      function setPitchDeg(v) {
+        const pv = clamp(v, PITCH_MIN, PITCH_MAX);
+        const num = document.getElementById("pitch");
+        const rng = document.getElementById("pitch_range");
+        if (num) num.value = pv;
+        if (rng) rng.value = pv;
+        localStorage.setItem("pitch_deg", String(pv));
+      }
+
       function moveXYZ() {
         if (!ws || ws.readyState !== 1) {
           alert("WebSocket not connected.");
@@ -329,13 +348,15 @@
         const x = parseFloat(document.getElementById("x").value);
         const y = parseFloat(document.getElementById("y").value);
         const z = parseFloat(document.getElementById("z").value);
+        const pitch = getPitchDeg();
 
         if (isNaN(x) || isNaN(y) || isNaN(z)) {
           alert("Please enter valid numbers");
           return;
         }
 
-        ws.send(JSON.stringify({ cmd: "move_xyz", x: x, y: y, z: z }));
+        setPitchDeg(pitch);
+        ws.send(JSON.stringify({ cmd: "move_xyz", x: x, y: y, z: z, pitch: pitch }));
       }
 
       function sendGcodeLine() {
@@ -529,6 +550,21 @@
         setWifiUI(false);
         setRobotUI("Unknown");
 
+        // pitch init
+        const savedPitch = Number(localStorage.getItem("pitch_deg"));
+        setPitchDeg(Number.isFinite(savedPitch) ? savedPitch : PITCH_DEFAULT);
+
+        const pitchNum = document.getElementById("pitch");
+        const pitchRng = document.getElementById("pitch_range");
+        if (pitchNum) {
+          pitchNum.addEventListener("input", () => setPitchDeg(pitchNum.value));
+          pitchNum.addEventListener("change", () => setPitchDeg(pitchNum.value));
+        }
+        if (pitchRng) {
+          pitchRng.addEventListener("input", () => setPitchDeg(pitchRng.value));
+          pitchRng.addEventListener("change", () => setPitchDeg(pitchRng.value));
+        }
+
         initWS();
         loadFiles();
         loadLimits();
@@ -607,6 +643,23 @@
             <label for="z">Z [mm]:</label>
             <input type="number" id="z" step="1" value="100" />
           </div>
+
+          <div class="form-group">
+            <label for="pitch">Pitch [deg]:</label>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+              <input type="number" id="pitch" step="1" min="-90" max="90" value="20" style="width: 90px" />
+              <input
+                type="range"
+                id="pitch_range"
+                min="-90"
+                max="90"
+                step="1"
+                value="20"
+                style="flex: 1; min-width: 160px"
+              />
+            </div>
+          </div>
+
           <div style="display: flex; gap: 10px; flex-wrap: wrap">
             <button onclick="moveXYZ()">Move</button>
             <button onclick="goHome()" style="background: #22c55e">HOME</button>

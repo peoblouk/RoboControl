@@ -65,39 +65,37 @@ static int cmd_joint(int argc, char **argv) // joint <id> <angle>
     return 0;
 }
 
-static int cmd_move(int argc, char **argv) // move <x> <y> <z>
+static int cmd_move(int argc, char **argv) // move <x> <y> <z> [pitch]
 {
-    if (argc != 4) {
-        printf("Usage: move <x> <y> <z>\n");
+    if (argc != 4 && argc != 5) {
+        printf("Usage: move <x> <y> <z> [pitch]\n");
         return 0;
     }
 
     float x = strtof(argv[1], NULL);
     float y = strtof(argv[2], NULL);
     float z = strtof(argv[3], NULL);
+    float pitch = (argc == 5) ? strtof(argv[4], NULL) : ROBOT_DEFAULT_PITCH_DEG;
 
-    // start measuring
     int64_t t_start_us = esp_timer_get_time();
-    bool res = robot_cmd_move_xyz(x, y, z);
-
-    // end measuring
+    bool res = robot_cmd_move_xyz(x, y, z, pitch);
     int64_t t_end_us = esp_timer_get_time();
     int64_t dt_us    = t_end_us - t_start_us;
     rt_stats_add_sample(&g_move_cmd_stats, dt_us);
 
-    #ifdef STATS_PRINT
+#ifdef STATS_PRINT
     if (res) {
-        printf("OK: Move to X=%.1f Y=%.1f Z=%.1f (queued) (time: %lld us)\n", 
-               x, y, z, (long long)dt_us);
+        printf("OK: Move to X=%.1f Y=%.1f Z=%.1f pitch=%.1f (queued) (time: %lld us)\n",
+               x, y, z, pitch, (long long)dt_us);
     } else {
-        printf("ERR: Robot queue full or not started (time: %lld us)\n", 
+        printf("ERR: Robot queue full or not started (time: %lld us)\n",
                (long long)dt_us);
     }
 
     if (g_move_cmd_stats.count % 10 == 0) {
         rt_stats_print("MOVE_CMD", &g_move_cmd_stats);
     }
-    #endif
+#endif
 
     return 0;
 }
@@ -321,51 +319,52 @@ static int cmd_tasks(int argc, char **argv) // tasks
 static int cmd_test(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    int ok = 1;
 
+    int ok = 1;
     robot_cmd_queue_flush();
 
-    float q[SERVO_COUNT];
-    for (int i = 0; i < SERVO_COUNT; i++) q[i] = 90.0f;
+    // ref point
+    const float X0 = 220.0f;
+    const float Y0 = 0.0f;
+    const float Z0 = 25.0f; 
+    const float ZS = 80.0f; 
+    const float P0 = 0.0f;
 
-    ok &= robot_cmd_move_joints_t(q, 2.0f, 0);
+    const float DX = 40.0f;
+    const float DY = 40.0f;
+    const float DZ = 40.0f;
+    const float DP = 20.0f;
 
-    q[3] = 70.0f;  ok &= robot_cmd_move_joints_t(q, 2.0f, 0);
-    q[3] = 110.0f; ok &= robot_cmd_move_joints_t(q, 2.0f, 0);
-    q[3] = 90.0f;  ok &= robot_cmd_move_joints_t(q, 2.0f, 0);
+    const TickType_t W = pdMS_TO_TICKS(2500);
 
-    printf(ok ? "OK: Joint sweep queued\n" : "ERR: Queue failed\n");
+    ok &= robot_cmd_move_xyz(X0, Y0, ZS, P0); vTaskDelay(W);
+
+    // Z sweep
+    ok &= robot_cmd_move_xyz(X0, Y0, Z0,     P0); vTaskDelay(W); // -Z
+    ok &= robot_cmd_move_xyz(X0, Y0, Z0+DZ,  P0); vTaskDelay(W); // +Z
+    ok &= robot_cmd_move_xyz(X0, Y0, Z0,     P0); vTaskDelay(W);
+
+    // X sweep
+    ok &= robot_cmd_move_xyz(X0-DX, Y0, Z0,  P0); vTaskDelay(W); // -X
+    ok &= robot_cmd_move_xyz(X0+DX, Y0, Z0,  P0); vTaskDelay(W); // +X
+    ok &= robot_cmd_move_xyz(X0,    Y0, Z0,  P0); vTaskDelay(W);
+
+    // Y sweep
+    ok &= robot_cmd_move_xyz(X0, Y0+DY, Z0,  P0); vTaskDelay(W); // +Y
+    ok &= robot_cmd_move_xyz(X0, Y0-DY, Z0,  P0); vTaskDelay(W); // -Y
+    ok &= robot_cmd_move_xyz(X0, Y0,    Z0,  P0); vTaskDelay(W);
+
+    // pitch sweep
+    ok &= robot_cmd_move_xyz(X0, Y0, Z0,   +DP); vTaskDelay(W);
+    ok &= robot_cmd_move_xyz(X0, Y0, Z0,   -DP); vTaskDelay(W);
+    ok &= robot_cmd_move_xyz(X0, Y0, Z0,    P0); vTaskDelay(W);
+
+    ok &= robot_cmd_move_xyz(X0, Y0, ZS, P0); vTaskDelay(W);
+
+    printf(ok ? "OK: Simple axis sweep queued\n" : "ERR: Queue failed\n");
     return 0;
 }
 
-/////
-// static int cmd_pwm(int argc, char **argv)
-// {
-//     if (argc == 1) {
-//         for (int i = 0; i < SERVO_COUNT; i++) {
-//             int mn = 0, mx = 0;
-//             servo_pwm_get_range_us(i, &mn, &mx);
-//             printf("servo %d: %d..%d us\n", i, mn, mx);
-//         }
-//         return 0;
-//     }
-
-//     if (argc != 4) {
-//         printf("Usage: pwm [servo_id min_us max_us]\n");
-//         printf("  pwm                 -> print all\n");
-//         printf("  pwm <id> <min> <max> -> set range\n");
-//         return 0;
-//     }
-
-//     int id = atoi(argv[1]);
-//     int mn = atoi(argv[2]);
-//     int mx = atoi(argv[3]);
-
-//     bool ok = servo_pwm_set_range_us(id, mn, mx);
-//     printf(ok ? "OK\n" : "ERR\n");
-//     return 0;
-// }
-/////
 static int cmd_disarm(int argc, char **argv)
 {
     (void)argc; (void)argv;

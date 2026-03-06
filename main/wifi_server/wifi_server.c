@@ -259,13 +259,18 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             cJSON *jx = cJSON_GetObjectItem(json, "x");
             cJSON *jy = cJSON_GetObjectItem(json, "y");
             cJSON *jz = cJSON_GetObjectItem(json, "z");
+            cJSON *jp = cJSON_GetObjectItem(json, "pitch");
+
+            float pitch = ROBOT_DEFAULT_PITCH_DEG;
 
             if (cJSON_IsNumber(jx) && cJSON_IsNumber(jy) && cJSON_IsNumber(jz)) {
                 float x = (float)jx->valuedouble;
                 float y = (float)jy->valuedouble;
                 float z = (float)jz->valuedouble;
+                if (cJSON_IsNumber(jp)) pitch = (float)jp->valuedouble;
 
-                bool ok = robot_cmd_move_xyz(x, y, z);
+
+                bool ok = robot_cmd_move_xyz(x, y, z, pitch);
                 int fd  = httpd_req_to_sockfd(req);
 
                 if (ok) {

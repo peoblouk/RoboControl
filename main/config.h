@@ -35,6 +35,8 @@
 #define SERVO_J4      5
 #define SERVO_J5      6   // gripper
 
+#define ROBOT_DEFAULT_PITCH_DEG 20.0f
+
 // Kompatibilita se starými názvy
 #define J1_A_SERVO    SERVO_J1_A
 #define J1_B_SERVO    SERVO_J1_B
@@ -72,7 +74,7 @@
 #define SERVO5_MAX_US  2300
 
 #define SERVO6_MIN_US  720
-#define SERVO6_MAX_US  1700
+#define SERVO6_MAX_US  2000
 
 #define SERVO_PWM_RANGES_INIT { \
     { SERVO0_MIN_US, SERVO0_MAX_US }, \
@@ -88,31 +90,34 @@
 // ROBOT: SERVO MAPPING (OFF / DIR)
 // ===============================
 // joint_deg_math -> servo_deg = OFF + DIR * joint_deg_math
-#define SERVO0_OFF_DEG  70.0f
-#define SERVO1_OFF_DEG  180.0f
-#define SERVO2_OFF_DEG  180.0f
-#define SERVO3_OFF_DEG  150.0f
-#define SERVO4_OFF_DEG  70.0f
-#define SERVO5_OFF_DEG  60.0f
-#define SERVO6_OFF_DEG  90.0f
+// #define SERVO0_OFF_DEG  75.0f
+// #define SERVO1_OFF_DEG  180.0f
+// #define SERVO2_OFF_DEG  180.0f
+// #define SERVO3_OFF_DEG  155.0f // 160
+// #define SERVO4_OFF_DEG  70.0f
+// #define SERVO5_OFF_DEG  98.0f
+// #define SERVO6_OFF_DEG  0.0f
 
-#define SERVO0_DIR      +1.0f
-#define SERVO1_DIR      +1.0f
-#define SERVO2_DIR      -1.0f
-#define SERVO3_DIR      +1.0f
-#define SERVO4_DIR      -1.0f
-#define SERVO5_DIR      +1.0f
-#define SERVO6_DIR      +1.0f
+// #define SERVO0_DIR      -1.0f
+// #define SERVO1_DIR      -1.0f
+// #define SERVO2_DIR      -1.0f
+// #define SERVO3_DIR      +1.0f
+// #define SERVO4_DIR      -1.0f
+// #define SERVO5_DIR      +1.0f
+// #define SERVO6_DIR      +1.0f
 
-#define SERVO_OFF_INIT { \
-    SERVO0_OFF_DEG, SERVO1_OFF_DEG, SERVO2_OFF_DEG, \
-    SERVO3_OFF_DEG, SERVO4_OFF_DEG, SERVO5_OFF_DEG, SERVO6_OFF_DEG \
-}
+// #define SERVO_OFF_INIT { 
+//     SERVO0_OFF_DEG, SERVO1_OFF_DEG, SERVO2_OFF_DEG, 
+//     SERVO3_OFF_DEG, SERVO4_OFF_DEG, SERVO5_OFF_DEG, SERVO6_OFF_DEG 
+// }
 
-#define SERVO_DIR_INIT { \
-    SERVO0_DIR, SERVO1_DIR, SERVO2_DIR, \
-    SERVO3_DIR, SERVO4_DIR, SERVO5_DIR, SERVO6_DIR \
-}
+// #define SERVO_DIR_INIT { 
+//     SERVO0_DIR, SERVO1_DIR, SERVO2_DIR, 
+//     SERVO3_DIR, SERVO4_DIR, SERVO5_DIR, SERVO6_DIR
+// }
+
+#define SERVO_OFF_INIT { 75.0f, 100.0f, 100.0f, 15.0f, 90.0f, 90.0f, 90.0f }
+#define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  0.8889f, -0.5f,  1.0f,  1.0f }
 
 // ===============================
 // ROBOT: J1 FOLLOWER
@@ -141,10 +146,10 @@
 // ===============================
 // ROBOT: ARM GEOMETRY (mm)
 // ===============================
-#define L0  83.0f
-#define L1  112.5f
-#define L2  73.5f
-#define L_TOOL  115.0f
+#define L0  75.0f
+#define L1  107.5f
+#define L2  74.5f
+#define L_TOOL 124.5f
 
 // ===============================
 // ROBOT: JOINT LIMITS (deg / deg/s)
@@ -238,7 +243,7 @@
 // Robot Positions
 // ===============================
 #define HOME_J0 75
-#define HOME_J1 75
+#define HOME_J1 80
 #define HOME_J2 30
 #define HOME_J3 120
 #define HOME_J4 90

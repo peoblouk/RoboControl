@@ -22,7 +22,6 @@
 #define RAD2DEG(x) ((x) * 180.0f / M_PI)
 #define DEG2RAD(x) ((x) * M_PI / 180.0f)
 
-
 // ===============================
 // SERVO CONFIGURATION (PWM output)
 // ===============================
@@ -49,7 +48,7 @@ typedef struct {
 extern sensor_t sensors[SENSOR_COUNT];
 
 // ===============================
-// JOINT LIMITS (per-axis safety)
+// JOINT LIMITS
 // ===============================
 typedef struct {
     float min_deg;
@@ -83,14 +82,12 @@ void servo_set_angle(int servo_id, float angle);
 void joint_set_angle(int joint_id, float angle);
 
 bool  robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp);
-bool  robot_xyz_reachable(float x, float y, float z);
+bool robot_tcp_reachable(float x, float y, float z, float pitch_deg);
 float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_COUNT]);
 
-void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT]);
-//void move_to_position(float q_target[SERVO_COUNT]);
+//void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT]);
 
 float robot_get_est_angle(int id);
-
 
 // Type of robot command
 typedef enum {
@@ -106,6 +103,7 @@ typedef struct {
     robot_cmd_type_t type;
     float q_target[SERVO_COUNT];
     float x, y, z;
+    float pitch_deg;
     float duration_s;
 } robot_cmd_t;
 
@@ -114,7 +112,7 @@ typedef struct {
 // ===============================
 void robot_control_start(void);
 bool robot_cmd_move_joints(const float q_target[SERVO_COUNT]);
-bool robot_cmd_move_xyz(float x, float y, float z);
+bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg);
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout);
 void robot_cmd_queue_flush(void);
 void robot_core_run_gcode(const char *filename);
@@ -122,5 +120,7 @@ void robot_core_run_gcode(const char *filename);
 void robot_disarm(void);
 void robot_arm(void);
 bool robot_is_armed(void);
+
+bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SERVO_COUNT]);
 
 #endif // ROBOT_IO

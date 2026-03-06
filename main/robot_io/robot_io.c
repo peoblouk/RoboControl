@@ -12,8 +12,8 @@ static const char *TAG = "robot_io";
 static adc_oneshot_unit_handle_t s_adc1 = NULL;
 static adc_oneshot_unit_handle_t s_adc2 = NULL;
 
-
 #define SERVO_DUTY_MAX ((1U << 14) - 1)   // timer is LEDC_TIMER_14_BIT
+
 static const int s_joint_master_servo[JOINT_COUNT] = {
     JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
 };
@@ -82,7 +82,7 @@ float robot_get_est_angle(int id)
 }
 
 // ===============================
-// SERVO PWM RANGES (per-servo, runtime adjustable)
+// SERVO PWM RANGES
 // ===============================
 static servo_pwm_range_t s_servo_pwm[SERVO_COUNT] = SERVO_PWM_RANGES_INIT;
 static portMUX_TYPE s_pwm_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -166,7 +166,6 @@ static inline void j1_a_allowed_range(float *lo, float *hi)
     const float b_lo = g_joint_limits[J1_B_SERVO].min_deg;
     const float b_hi = g_joint_limits[J1_B_SERVO].max_deg;
 
-    // b = a + trim => a = b - trim
     const float a_from_b_lo = b_lo - J1_B_TRIM_DEG;
     const float a_from_b_hi = b_hi - J1_B_TRIM_DEG;
 
@@ -178,7 +177,7 @@ static inline void j1_a_allowed_range(float *lo, float *hi)
 }
 
 // ===============================
-// JOINT LIMITS (per joint_id)
+// JOINT LIMITS
 // ===============================
 static void joint_limits_get(int joint_id, float *lo, float *hi, float *vmax)
 {
@@ -330,7 +329,6 @@ void servo_set_angle(int servo_id, float angle)
     int master = servo_master(servo_id);
     int other  = servo_follower(master);
 
-    // clamp pro master
     float lo = g_joint_limits[master].min_deg;
     float hi = g_joint_limits[master].max_deg;
 
@@ -357,17 +355,14 @@ void servo_set_angle(int servo_id, float angle)
         return;
     }
 
-    // master pwm
     uint32_t duty = angle_to_duty(master, angle);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[master].channel, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[master].channel);
     s_last_q[master] = angle;
 
-    // follower pwm (J1_B)
     if (other >= 0) {
         float other_angle = j1_b_from_j1_a(angle);
 
-        // clamp follower separately
         float lo2 = g_joint_limits[other].min_deg;
         float hi2 = g_joint_limits[other].max_deg;
         other_angle = clampf(other_angle, lo2, hi2);
@@ -426,16 +421,19 @@ bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
     return ok;
 }
 
-bool robot_xyz_reachable(float x, float y, float z)
+bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
 {
-    float R = sqrtf(x*x + y*y);
-    float z_sh = z - L0;
+    float r = sqrtf(x*x + y*y);
+    float phi = DEG2RAD(pitch_deg);
 
-    float d = sqrtf(R*R + z_sh*z_sh);
+    float r_w  = r - L_TOOL * cosf(phi);
+    float z_w  = z - L_TOOL * sinf(phi);
+    float z_sh = z_w - L0;
+
+    float d = sqrtf(r_w*r_w + z_sh*z_sh);
 
     if (d > (L1 + L2)) return false;
     if (d < fabsf(L1 - L2)) return false;
-
     return true;
 }
 
@@ -462,34 +460,124 @@ float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_
 // ===============================
 // INVERSE KINEMATICS
 // ===============================
-void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
+static bool inverse_kinematics_tcp(float x, float y, float z,
+                                   float tool_pitch_deg,
+                                   float q_target[SERVO_COUNT])
 {
-    float q0 = atan2f(y, x);
+    float r = sqrtf(x*x + y*y);
 
-    float R    = sqrtf(x*x + y*y);
-    float z_sh = z - L0;
-    float d    = sqrtf(R*R + z_sh*z_sh);
+    // base angle, keep last when x=y ~ 0
+    float q0;
+    if (r < 1e-6f) {
+        float d0 = DIR[0];
+        q0 = (fabsf(d0) < 1e-6f) ? 0.0f : DEG2RAD((s_last_q[0] - OFF[0]) / d0);
+    } else {
+        q0 = atan2f(y, x);
+    }
 
-    float cos_q2 = (d*d - L1*L1 - L2*L2) / (2.0f*L1*L2);
-    if (cos_q2 > 1.0f)  cos_q2 = 1.0f;
+    float phi = DEG2RAD(tool_pitch_deg);
+
+    // wrist (pitch pivot) from TCP
+    float r_w  = r - (float)L_TOOL * cosf(phi);
+    float z_w  = z - (float)L_TOOL * sinf(phi);
+    float z_sh = z_w - L0;
+
+    float d2 = r_w*r_w + z_sh*z_sh;
+    float d  = sqrtf(d2);
+
+    if (d > (L1 + L2)) return false;
+    if (d < fabsf(L1 - L2)) return false;
+
+    float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f*L1*L2);
+    if (cos_q2 >  1.0f) cos_q2 =  1.0f;
     if (cos_q2 < -1.0f) cos_q2 = -1.0f;
 
+    // elbow angle in [0..pi]
     float q2 = acosf(cos_q2);
 
-    float phi = atan2f(z_sh, R);
-    float psi = atan2f(L2*sinf(q2), L1 + L2*cosf(q2));
-    float q1  = phi - psi;
+    float phi2 = atan2f(z_sh, r_w);
+    float psi  = atan2f(L2*sinf(q2), L1 + L2*cosf(q2));
 
-    // joint angles -> theoretical
-    float j0 = RAD2DEG(q0);
-    float j1 = RAD2DEG(q1);
-    float j2 = RAD2DEG(q2);
+    // two elbow configurations: q1 = phi2 ± psi
+    float q1_opts[2] = { (phi2 - psi), (phi2 + psi) };
 
-    // mapping joint -> servo (offset)
-    q_target[0]          = map_servo(0, j0);
-    q_target[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
-    q_target[3]          = map_servo(3, j2);
+    float best_q[SERVO_COUNT];
+    float best_cost = 1e30f;
+    bool  best_ok = false;
+
+    for (int e = 0; e < 2; e++) {
+        float q1 = q1_opts[e];
+
+        // raw q3
+        float q3_raw = phi - q1 - q2;
+
+        // try q3 wrapped by ±2π to fit limits / reduce motion
+        for (int k = -1; k <= 1; k++) {
+            float q3 = q3_raw + (float)k * 2.0f * (float)M_PI;
+
+            float j0 = RAD2DEG(q0);
+            float j1 = RAD2DEG(q1);
+            float j2 = RAD2DEG(q2);
+            float j3 = RAD2DEG(q3);
+
+            float cand[SERVO_COUNT];
+            for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
+
+            cand[0]          = map_servo(0, j0);
+            cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
+            cand[3]          = map_servo(3, j2);
+            cand[4]          = map_servo(4, j3);
+
+            // reject if any joint out of range (no clamping here)
+            if (!robot_validate_and_prepare_q(cand, false)) continue;
+
+            // cost = minimal change from current pose (servo space)
+            float cost = 0.0f;
+            cost += fabsf(cand[0]          - s_last_q[0]);
+            cost += fabsf(cand[J1_A_SERVO] - s_last_q[J1_A_SERVO]);
+            cost += fabsf(cand[3]          - s_last_q[3]);
+            cost += fabsf(cand[4]          - s_last_q[4]);
+
+            if (cost < best_cost) {
+                best_cost = cost;
+                for (int i = 0; i < SERVO_COUNT; i++) best_q[i] = cand[i];
+                best_ok = true;
+            }
+        }
+    }
+
+    if (!best_ok) return false;
+
+    for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = best_q[i];
+    return true;
 }
+
+// void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
+// {
+//     float q0 = atan2f(y, x);
+
+//     float R    = sqrtf(x*x + y*y);
+//     float z_sh = z - L0;
+//     float d    = sqrtf(R*R + z_sh*z_sh);
+
+//     float cos_q2 = (d*d - L1*L1 - L2*L2) / (2.0f*L1*L2);
+//     if (cos_q2 > 1.0f)  cos_q2 = 1.0f;
+//     if (cos_q2 < -1.0f) cos_q2 = -1.0f;
+
+//     float q2 = acosf(cos_q2);
+
+//     float phi = atan2f(z_sh, R);
+//     float psi = atan2f(L2*sinf(q2), L1 + L2*cosf(q2));
+//     float q1  = phi - psi;
+
+//     float j0 = RAD2DEG(q0);
+//     float j1 = RAD2DEG(q1);
+//     float j2 = RAD2DEG(q2);
+
+//     q_target[0]          = map_servo(0, j0);
+//     q_target[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
+//     q_target[3]          = map_servo(3, j2);
+// }
 
 // ===============================
 // SEGMENT BUFFER
@@ -600,17 +688,21 @@ static void robot_control_task(void *arg)
                 seg.T = 1.0f;
             }
             else if (cmd.type == ROBOT_CMD_MOVE_XYZ) {
-                if (!robot_xyz_reachable(cmd.x, cmd.y, cmd.z)) {
-                    ESP_LOGW(TAG, "XYZ out of reach: x=%.1f y=%.1f z=%.1f", cmd.x, cmd.y, cmd.z);
-                    continue;
-                }
-                for (int i = 0; i < SERVO_COUNT; i++) {
-                    seg.q1[i] = seg.q0[i];
-                }
+                for (int i = 0; i < SERVO_COUNT; i++) seg.q1[i] = seg.q0[i];
 
-                inverse_kinematics(cmd.x, cmd.y, cmd.z, seg.q1);
-                ESP_LOGW(TAG, "IK q: s0=%.1f s1=%.1f s2=%.1f s3=%.1f",
-                        seg.q1[0], seg.q1[1], seg.q1[2], seg.q1[3]);
+                float pitch = cmd.pitch_deg;
+                if (!isfinite(pitch)) pitch = ROBOT_DEFAULT_PITCH_DEG;
+                if (pitch > 89.0f)  pitch = 89.0f;
+                if (pitch < -89.0f) pitch = -89.0f;
+
+                ESP_LOGW(TAG, "IK TCP: x=%.1f y=%.1f z=%.1f pitch=%.1f",
+                         cmd.x, cmd.y, cmd.z, pitch);
+
+                bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
+                if (!ok) { ESP_LOGW(TAG, "IK TCP failed"); continue; }
+
+                ESP_LOGW(TAG, "IK servo: s0(J0)=%.1f s1(J1)=%.1f s3(J2)=%.1f s4(J3)=%.1f",
+                         seg.q1[0], seg.q1[1], seg.q1[3], seg.q1[4]);
 
                 robot_validate_and_prepare_q(seg.q1, true);
                 seg.T = 1.0f;
@@ -707,7 +799,7 @@ bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
     return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
 }
 
-bool robot_cmd_move_xyz(float x, float y, float z)
+bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg)
 {
     if (!s_armed) return false;
     if (s_robot_queue == NULL) return false;
@@ -715,6 +807,7 @@ bool robot_cmd_move_xyz(float x, float y, float z)
     robot_cmd_t cmd = {0};
     cmd.type = ROBOT_CMD_MOVE_XYZ;
     cmd.x = x; cmd.y = y; cmd.z = z;
+    cmd.pitch_deg = pitch_deg;
 
     return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
 }
@@ -756,6 +849,16 @@ static void gcode_executor_task(void *arg)
 
     free(params);
     vTaskDelete(NULL);
+}
+
+bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SERVO_COUNT])
+{
+    for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = robot_get_est_angle(i);
+
+    if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
+
+    robot_validate_and_prepare_q(q_target, true);
+    return true;
 }
 
 void robot_core_run_gcode(const char *filename)

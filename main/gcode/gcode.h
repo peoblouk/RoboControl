@@ -4,7 +4,7 @@
 
 #ifndef GCODE_H
 #define GCODE_H
-#include "config.h"   // Configuration
+#include "config.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "robot_io.h"
+#include "esp_log.h"
 
 typedef struct {
     bool absolute;     // G90/G91

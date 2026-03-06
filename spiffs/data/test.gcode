@@ -1,40 +1,34 @@
 ; ==========================================
-; Ukazkovy G-CODE pro roboticke rameno
+; Simulace "pick & place" bez gripper cmd
 ; ==========================================
-; Popis: Testovaci sekvence pohybu
-; Jednotky: mm (G21)
-; Souradnice: Absolutni (G90)
-; ==========================================
+G21
+G90
 
-; 1. Nastaveni rezimu
-G21             ; Nastavit jednotky na milimetry
-G90             ; Nastavit absolutni pozicovani
+; Bezpecna pozice
+G1 X220 Y0 Z140 F1000
+G4 P300
 
-; 2. Vychozi pozice (HOME) - bezpecna vyska
-; Predpoklad: X0 Y150 je stred pred robotem
-G1 X0 Y150 Z150 F1000  ; F = rychlost posuvu
+; Nad "pickup"
+G1 X200 Y0 Z120
+G4 P300
 
-; 3. Presun nad bod A (Odber)
-G1 X100 Y100 Z100
-G4 P500         ; Pauza 500ms (cekani na ustaleni)
+; Sestup kousek nad zem (uprav si Z podle reality)
+G1 X200 Y0 Z80
+G4 P800    ; simulace uchopu
 
-; 4. Klesnuti dolu k bodu A
-G1 X100 Y100 Z20
-G4 P1000        ; Pauza 1 sekunda (simulace uchopu)
+; Zvednout
+G1 X200 Y0 Z120
+G4 P200
 
-; 5. Zvednuti zpet nahoru
-G1 X100 Y100 Z100
+; Presun nad "place"
+G1 X240 Y0 Z120
+G4 P300
 
-; 6. Presun nad bod B (Odlozeni - na opacne strane)
-G1 X-100 Y100 Z100
+; Sestup
+G1 X240 Y0 Z80
+G4 P800    ; simulace pusteni
 
-; 7. Klesnuti k bodu B
-G1 X-100 Y100 Z20
-G4 P1000        ; Pauza 1 sekunda (simulace polozeni)
-
-; 8. Zvednuti a navrat domu
-G1 X-100 Y100 Z150
-G1 X0 Y150 Z150
-
-; Konec programu
+; Zvednout a konec
+G1 X240 Y0 Z120
+G1 X220 Y0 Z140
 M30
