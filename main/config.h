@@ -250,4 +250,30 @@
 #define HOME_J5 90
 #define HOME_J6 90
 
+// ===============================
+// ROBOT: SENSORLESS / REFERENCE
+// ===============================
+#define ROBOT_USE_SENSORS 0
+
+#define ROBOT_WORK_OFFSET_X_DEFAULT 220.0f
+#define ROBOT_WORK_OFFSET_Y_DEFAULT 0.0f
+#define ROBOT_WORK_OFFSET_Z_DEFAULT 25.0f
+
+#define ROBOT_HOME_X_BASE_DEFAULT   220.0f
+#define ROBOT_HOME_Y_BASE_DEFAULT   0.0f
+#define ROBOT_HOME_Z_BASE_DEFAULT   80.0f
+#define ROBOT_HOME_PITCH_DEG_DEFAULT 0.0f
+
+// Home pose v servo prostoru:
+// s0, s1, s2(follower), s3, s4, s5, s6
+#define HOME_Q_INIT { \
+    75.0f, \
+    80.0f, \
+    (80.0f + J1_B_TRIM_DEG), \
+    30.0f, \
+    120.0f, \
+    90.0f, \
+    90.0f \
+}
+
 #endif // CONFIG_H

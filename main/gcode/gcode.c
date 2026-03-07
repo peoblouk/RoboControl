@@ -15,14 +15,41 @@ static gcode_state_t st;
 
 static float to_mm(float v) { return st.units_mm ? v : (v * 25.4f); }
 
+void gcode_set_current_position(float x, float y, float z, float pitch_deg)
+{
+    st.x = x;
+    st.y = y;
+    st.z = z;
+    st.pitch_deg = pitch_deg;
+}
+
+bool gcode_sync_to_robot_pose(void)
+{
+    robot_pose_t pose;
+    if (!robot_get_tcp_estimate_work(&pose)) {
+        return false;
+    }
+
+    gcode_set_current_position(pose.x, pose.y, pose.z, pose.pitch_deg);
+    return true;
+}
+
 void gcode_reset(void)
 {
     st.absolute = true;
     st.units_mm = true;
     st.feed_mm_s = 50.0f;
+    st.pitch_deg = ROBOT_DEFAULT_PITCH_DEG;
     st.x = st.y = st.z = 0.0f;
     s_stop = false;
     s_error = false;
+
+    if (gcode_sync_to_robot_pose()) {
+        ESP_LOGI(TAG, "G-code synced to robot pose: x=%.1f y=%.1f z=%.1f pitch=%.1f",
+                 st.x, st.y, st.z, st.pitch_deg);
+    } else {
+        ESP_LOGW(TAG, "G-code state reset without TCP sync (pose unknown)");
+    }
 }
 
 void gcode_stop(void)
@@ -53,7 +80,7 @@ static bool send_xyz_blocking(float x, float y, float z, float pitch_deg, TickTy
     TickType_t t0 = xTaskGetTickCount();
 
     while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
-        if (robot_cmd_move_xyz(x, y, z, pitch_deg)) {
+        if (robot_cmd_move_xyz_work(x, y, z, pitch_deg)) {
             vTaskDelay(pdMS_TO_TICKS(60));
             return true;
         }
@@ -81,7 +108,7 @@ bool gcode_push_line(const char *line_in)
     bool hasZ = parse_word(line, 'Z', &z);
     bool hasP = parse_word(line, 'P', &p);
 
-    float pitch_deg = hasP ? p : 0.0f;
+    float pitch_deg = hasP ? p : st.pitch_deg;
 
     if (hasG) {
         int gi = (int)lroundf(g);
@@ -92,6 +119,22 @@ bool gcode_push_line(const char *line_in)
         if (gi == 21) { st.units_mm = true; return true; }
 
         if (gi == 0 || gi == 1) {
+            if (!robot_is_referenced()) {
+                ESP_LOGE(TAG, "Robot is not referenced. Run HOME/reference first.");
+                s_error = true;
+                s_stop = true;
+                robot_cmd_queue_flush();
+                return false;
+            }
+
+            if (!robot_has_tcp_estimate()) {
+                ESP_LOGE(TAG, "Robot TCP pose is unknown. Use HOME or cartesian move before G-code.");
+                s_error = true;
+                s_stop = true;
+                robot_cmd_queue_flush();
+                return false;
+            }
+
             if (hasF) {
                 float v_mm_min = to_mm(f);
                 st.feed_mm_s = v_mm_min / 60.0f;
@@ -103,18 +146,16 @@ bool gcode_push_line(const char *line_in)
             if (hasY) ty = st.absolute ? to_mm(y) : (st.y + to_mm(y));
             if (hasZ) tz = st.absolute ? to_mm(z) : (st.z + to_mm(z));
 
-            if (!robot_tcp_reachable(tx, ty, tz, pitch_deg)) {
-                ESP_LOGE(TAG, "Unreachable XYZ: x=%.2f y=%.2f z=%.2f pitch=%.2f", tx, ty, tz, pitch_deg);
+            if (!robot_tcp_reachable_work(tx, ty, tz, pitch_deg)) {
+                ESP_LOGE(TAG, "Unreachable WORK XYZ: x=%.2f y=%.2f z=%.2f pitch=%.2f", tx, ty, tz, pitch_deg);
                 s_error = true;
                 s_stop = true;
                 robot_cmd_queue_flush();
                 return false;
             }
 
-            float pitch_deg = hasP ? p : NAN; // NAN => default pitch v robot_io.c
-
             if (!send_xyz_blocking(tx, ty, tz, pitch_deg, pdMS_TO_TICKS(8000))) {
-                ESP_LOGE(TAG, "Queue timeout sending XYZ");
+                ESP_LOGE(TAG, "Queue timeout sending WORK XYZ");
                 s_error = true;
                 s_stop = true;
                 return false;
@@ -123,6 +164,7 @@ bool gcode_push_line(const char *line_in)
             st.x = tx;
             st.y = ty;
             st.z = tz;
+            st.pitch_deg = pitch_deg;
             return true;
         }
     }
@@ -141,6 +183,16 @@ bool gcode_run_file(const char *filename)
     gcode_reset();
     s_stop = false;
     s_error = false;
+
+    if (!robot_is_referenced()) {
+        ESP_LOGE(TAG, "Cannot run G-code: robot is not referenced");
+        return false;
+    }
+
+    if (!robot_has_tcp_estimate()) {
+        ESP_LOGE(TAG, "Cannot run G-code: current TCP pose is unknown");
+        return false;
+    }
 
     if (!filename || filename[0] == 0) {
         ESP_LOGE(TAG, "Empty filename");

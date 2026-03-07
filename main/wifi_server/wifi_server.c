@@ -171,7 +171,10 @@ static void ws_broadcast(const char *msg) {
 }
 
 static inline const char *robot_state_str_(void) {
-    return robot_is_armed() ? "IDLE" : "DISARMED";
+    if (!robot_is_armed()) return "DISARMED";
+    if (!robot_is_referenced()) return "UNREFERENCED";
+    if (!robot_has_tcp_estimate()) return "POSE_UNKNOWN";
+    return "IDLE";
 }
 
 static esp_err_t ws_handler(httpd_req_t *req) {
@@ -239,8 +242,27 @@ static esp_err_t ws_handler(httpd_req_t *req) {
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "sensors") == 0) {
             cJSON *root = cJSON_CreateObject();
             cJSON_AddStringToObject(root, "state", robot_state_str_());
-            cJSON *arr  = cJSON_AddArrayToObject(root, "sensors");
+            cJSON_AddBoolToObject(root, "armed", robot_is_armed());
+            cJSON_AddBoolToObject(root, "referenced", robot_is_referenced());
+            cJSON_AddBoolToObject(root, "tcp_est_valid", robot_has_tcp_estimate());
 
+            float wx, wy, wz;
+            robot_get_work_offset(&wx, &wy, &wz);
+            cJSON *wo = cJSON_AddObjectToObject(root, "work_offset");
+            cJSON_AddNumberToObject(wo, "x", wx);
+            cJSON_AddNumberToObject(wo, "y", wy);
+            cJSON_AddNumberToObject(wo, "z", wz);
+
+            robot_pose_t pose;
+            if (robot_get_tcp_estimate_work(&pose)) {
+                cJSON *tcp = cJSON_AddObjectToObject(root, "tcp_work");
+                cJSON_AddNumberToObject(tcp, "x", pose.x);
+                cJSON_AddNumberToObject(tcp, "y", pose.y);
+                cJSON_AddNumberToObject(tcp, "z", pose.z);
+                cJSON_AddNumberToObject(tcp, "pitch", pose.pitch_deg);
+            }
+
+            cJSON *arr  = cJSON_AddArrayToObject(root, "sensors");
             static const int joint_to_servo[6] = { 0, 1, 3, 4, 5, 6 };
 
             for (int i = 0; i < 6; i++) {
@@ -270,7 +292,7 @@ static esp_err_t ws_handler(httpd_req_t *req) {
                 if (cJSON_IsNumber(jp)) pitch = (float)jp->valuedouble;
 
 
-                bool ok = robot_cmd_move_xyz(x, y, z, pitch);
+                bool ok = robot_cmd_move_xyz_work(x, y, z, pitch);
                 int fd  = httpd_req_to_sockfd(req);
 
                 if (ok) {
@@ -317,6 +339,46 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"arm\",\"state\":\"IDLE\"}");
         }
 
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "set_work_offset") == 0) {
+            cJSON *jx = cJSON_GetObjectItem(json, "x");
+            cJSON *jy = cJSON_GetObjectItem(json, "y");
+            cJSON *jz = cJSON_GetObjectItem(json, "z");
+            int fd = httpd_req_to_sockfd(req);
+
+            if (cJSON_IsNumber(jx) && cJSON_IsNumber(jy) && cJSON_IsNumber(jz)) {
+                robot_set_work_offset((float)jx->valuedouble,
+                                      (float)jy->valuedouble,
+                                      (float)jz->valuedouble);
+                ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"set_work_offset\"}");
+            } else {
+                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"set_work_offset\",\"reason\":\"bad_args\"}");
+            }
+        }
+
+        if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "home") == 0) {
+            int fd = httpd_req_to_sockfd(req);
+            float q[SERVO_COUNT];
+            for (int i = 0; i < SERVO_COUNT; i++) q[i] = 90.0f;
+            q[1] = HOME_J1;
+            q[3] = HOME_J2;
+            q[4] = HOME_J3;
+            q[5] = HOME_J4;
+            robot_validate_and_prepare_q(q, true);
+            robot_cmd_queue_flush();
+            bool ok = robot_cmd_move_joints_home(q,
+                                                 ROBOT_HOME_X_BASE_DEFAULT,
+                                                 ROBOT_HOME_Y_BASE_DEFAULT,
+                                                 ROBOT_HOME_Z_BASE_DEFAULT,
+                                                 ROBOT_HOME_PITCH_DEG_DEFAULT);
+            if (ok) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+                gcode_reset();
+                ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"home\",\"state\":\"QUEUED\"}");
+            } else {
+                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"home\",\"reason\":\"queue_failed\"}");
+            }
+        }
+
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "gcode_stop") == 0) {
             int fd = httpd_req_to_sockfd(req);
             gcode_stop();
@@ -335,8 +397,27 @@ static void ws_task_sensors(void *arg) {
     for (;;) {
         cJSON *root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "state", robot_state_str_());
-        cJSON *arr  = cJSON_AddArrayToObject(root, "sensors");
+        cJSON_AddBoolToObject(root, "armed", robot_is_armed());
+        cJSON_AddBoolToObject(root, "referenced", robot_is_referenced());
+        cJSON_AddBoolToObject(root, "tcp_est_valid", robot_has_tcp_estimate());
 
+        float wx, wy, wz;
+        robot_get_work_offset(&wx, &wy, &wz);
+        cJSON *wo = cJSON_AddObjectToObject(root, "work_offset");
+        cJSON_AddNumberToObject(wo, "x", wx);
+        cJSON_AddNumberToObject(wo, "y", wy);
+        cJSON_AddNumberToObject(wo, "z", wz);
+
+        robot_pose_t pose;
+        if (robot_get_tcp_estimate_work(&pose)) {
+            cJSON *tcp = cJSON_AddObjectToObject(root, "tcp_work");
+            cJSON_AddNumberToObject(tcp, "x", pose.x);
+            cJSON_AddNumberToObject(tcp, "y", pose.y);
+            cJSON_AddNumberToObject(tcp, "z", pose.z);
+            cJSON_AddNumberToObject(tcp, "pitch", pose.pitch_deg);
+        }
+
+        cJSON *arr  = cJSON_AddArrayToObject(root, "sensors");
         static const int joint_to_servo[6] = { 0, 1, 3, 4, 5, 6 };
 
         for (int i = 0; i < 6; i++) {

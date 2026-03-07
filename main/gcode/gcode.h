@@ -20,13 +20,15 @@ typedef struct {
     bool absolute;     // G90/G91
     bool units_mm;     // G21/G20
     float feed_mm_s;   // from F (mm/min -> mm/s)
-    float x, y, z;     // current position in mm
+    float x, y, z;     // current position in work frame [mm]
+    float pitch_deg;   // current tool pitch estimate [deg]
 } gcode_state_t;
 
-// Functions prototypes
-bool gcode_push_line(const char *line);    // push single G-code line
-bool gcode_run_file(const char *filename); // run G-code from file
-void gcode_stop(void);                     // stop G-code execution
-void gcode_reset(void);                    // reset G-code state
+bool gcode_push_line(const char *line);
+bool gcode_run_file(const char *filename);
+void gcode_stop(void);
+void gcode_reset(void);
+void gcode_set_current_position(float x, float y, float z, float pitch_deg);
+bool gcode_sync_to_robot_pose(void);
 
 #endif // GCODE_H

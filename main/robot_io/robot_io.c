@@ -3,6 +3,7 @@
 // ===============================
 
 #include "robot_io.h"
+#include "gcode.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -59,6 +60,21 @@ static int s_seg_w = 0, s_seg_r = 0;
 static traj_seg_t s_cur = {0};
 static float s_last_q[SERVO_COUNT] = {0};
 static volatile bool s_armed = true;
+static volatile bool s_referenced = false;
+static volatile bool s_tcp_est_valid = false;
+static robot_pose_t s_tcp_est_base = {
+    .x = ROBOT_HOME_X_BASE_DEFAULT,
+    .y = ROBOT_HOME_Y_BASE_DEFAULT,
+    .z = ROBOT_HOME_Z_BASE_DEFAULT,
+    .pitch_deg = ROBOT_HOME_PITCH_DEG_DEFAULT,
+};
+static const float s_home_q_init[SERVO_COUNT] = HOME_Q_INIT;
+
+static float s_work_offset_xyz[3] = {
+    ROBOT_WORK_OFFSET_X_DEFAULT,
+    ROBOT_WORK_OFFSET_Y_DEFAULT,
+    ROBOT_WORK_OFFSET_Z_DEFAULT,
+};
 
 static inline float clampf(float v, float lo, float hi) {
     if (v < lo) return lo;
@@ -75,10 +91,84 @@ static inline int servo_follower(int servo_id) {
     return (servo_id == J1_A_SERVO) ? J1_B_SERVO : -1;
 }
 
+static inline void work_to_base_xyz(float xw, float yw, float zw, float *xb, float *yb, float *zb)
+{
+    if (xb) *xb = xw + s_work_offset_xyz[0];
+    if (yb) *yb = yw + s_work_offset_xyz[1];
+    if (zb) *zb = zw + s_work_offset_xyz[2];
+}
+
+static inline void base_to_work_xyz(float xb, float yb, float zb, float *xw, float *yw, float *zw)
+{
+    if (xw) *xw = xb - s_work_offset_xyz[0];
+    if (yw) *yw = yb - s_work_offset_xyz[1];
+    if (zw) *zw = zb - s_work_offset_xyz[2];
+}
+
+static inline void robot_tcp_estimate_invalidate(void)
+{
+    s_tcp_est_valid = false;
+}
+
+static inline void robot_tcp_estimate_set_base(float x, float y, float z, float pitch_deg)
+{
+    s_tcp_est_base.x = x;
+    s_tcp_est_base.y = y;
+    s_tcp_est_base.z = z;
+    s_tcp_est_base.pitch_deg = pitch_deg;
+    s_tcp_est_valid = true;
+}
+
 float robot_get_est_angle(int id)
 {
     if (id < 0 || id >= SERVO_COUNT) return 0.0f;
     return s_last_q[id];
+}
+
+void robot_set_work_offset(float x, float y, float z)
+{
+    s_work_offset_xyz[0] = x;
+    s_work_offset_xyz[1] = y;
+    s_work_offset_xyz[2] = z;
+    ESP_LOGI(TAG, "Work offset set: x=%.1f y=%.1f z=%.1f", x, y, z);
+}
+
+void robot_get_work_offset(float *x, float *y, float *z)
+{
+    if (x) *x = s_work_offset_xyz[0];
+    if (y) *y = s_work_offset_xyz[1];
+    if (z) *z = s_work_offset_xyz[2];
+}
+
+bool robot_is_referenced(void)
+{
+    return s_referenced;
+}
+
+bool robot_has_tcp_estimate(void)
+{
+    return s_tcp_est_valid;
+}
+
+void robot_clear_reference(void)
+{
+    s_referenced = false;
+    robot_tcp_estimate_invalidate();
+}
+
+bool robot_get_tcp_estimate_base(robot_pose_t *pose)
+{
+    if (!pose || !s_tcp_est_valid) return false;
+    *pose = s_tcp_est_base;
+    return true;
+}
+
+bool robot_get_tcp_estimate_work(robot_pose_t *pose)
+{
+    if (!pose || !s_tcp_est_valid) return false;
+    *pose = s_tcp_est_base;
+    base_to_work_xyz(s_tcp_est_base.x, s_tcp_est_base.y, s_tcp_est_base.z, &pose->x, &pose->y, &pose->z);
+    return true;
 }
 
 // ===============================
@@ -337,6 +427,7 @@ void servo_set_angle(int servo_id, float angle)
     }
 
     angle = clampf(angle, lo, hi);
+    robot_tcp_estimate_invalidate();
 
     if (!s_armed) {
         ledc_stop(LEDC_LOW_SPEED_MODE, servos[master].channel, 0);
@@ -373,6 +464,15 @@ void servo_set_angle(int servo_id, float angle)
 
         s_last_q[other] = other_angle;
     }
+}
+
+static void seed_last_q_from_home(void)
+{
+    for (int i = 0; i < SERVO_COUNT; i++) {
+        s_last_q[i] = s_home_q_init[i];
+    }
+
+    robot_validate_and_prepare_q(s_last_q, true);
 }
 
 // ===============================
@@ -435,6 +535,13 @@ bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
     if (d > (L1 + L2)) return false;
     if (d < fabsf(L1 - L2)) return false;
     return true;
+}
+
+bool robot_tcp_reachable_work(float x, float y, float z, float pitch_deg)
+{
+    float xb, yb, zb;
+    work_to_base_xyz(x, y, z, &xb, &yb, &zb);
+    return robot_tcp_reachable(xb, yb, zb, pitch_deg);
 }
 
 float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_COUNT])
@@ -626,22 +733,9 @@ static void robot_control_task(void *arg)
     (void)arg;
 
     for (int i = 0; i < SERVO_COUNT; i++) s_last_q[i] = 90.0f;
-
-    for (int j = 0; j < JOINT_COUNT; j++) {
-        int si = s_joint_sensor_idx[j];
-        float a = (si >= 0 && si < SENSOR_COUNT) ? sensor_read_angle(si) : 90.0f;
-        if (a < 0) a = 90.0f;
-
-        float lo, hi, vmax;
-        joint_limits_get(j, &lo, &hi, &vmax);
-        (void)vmax;
-
-        a = clampf(a, lo, hi);
-
-        int s = s_joint_master_servo[j];
-        s_last_q[s] = a;
-        if (s == J1_A_SERVO) s_last_q[J1_B_SERVO] = j1_b_from_j1_a(a);
-    }
+    
+    seed_last_q_from_home();
+    robot_clear_reference();
 
     robot_cmd_t cmd;
     static bool disarmed_latched = false;
@@ -681,11 +775,19 @@ static void robot_control_task(void *arg)
             traj_seg_t seg = {0};
 
             for (int i = 0; i < SERVO_COUNT; i++) seg.q0[i] = s_last_q[i];
+            seg.tcp_target_valid = false;
+            seg.mark_referenced_on_finish = false;
 
             if (cmd.type == ROBOT_CMD_MOVE_JOINTS) {
                 for (int i = 0; i < SERVO_COUNT; i++) seg.q1[i] = cmd.q_target[i];
                 robot_validate_and_prepare_q(seg.q1, true);
                 seg.T = 1.0f;
+                seg.tcp_target_valid = cmd.tcp_target_valid;
+                seg.mark_referenced_on_finish = cmd.mark_referenced_on_finish;
+                seg.tcp_target_base.x = cmd.x;
+                seg.tcp_target_base.y = cmd.y;
+                seg.tcp_target_base.z = cmd.z;
+                seg.tcp_target_base.pitch_deg = cmd.pitch_deg;
             }
             else if (cmd.type == ROBOT_CMD_MOVE_XYZ) {
                 for (int i = 0; i < SERVO_COUNT; i++) seg.q1[i] = seg.q0[i];
@@ -695,7 +797,7 @@ static void robot_control_task(void *arg)
                 if (pitch > 89.0f)  pitch = 89.0f;
                 if (pitch < -89.0f) pitch = -89.0f;
 
-                ESP_LOGW(TAG, "IK TCP: x=%.1f y=%.1f z=%.1f pitch=%.1f",
+                ESP_LOGW(TAG, "IK TCP(base): x=%.1f y=%.1f z=%.1f pitch=%.1f",
                          cmd.x, cmd.y, cmd.z, pitch);
 
                 bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
@@ -706,11 +808,22 @@ static void robot_control_task(void *arg)
 
                 robot_validate_and_prepare_q(seg.q1, true);
                 seg.T = 1.0f;
+                seg.tcp_target_valid = true;
+                seg.tcp_target_base.x = cmd.x;
+                seg.tcp_target_base.y = cmd.y;
+                seg.tcp_target_base.z = cmd.z;
+                seg.tcp_target_base.pitch_deg = pitch;
             }
             else if (cmd.type == ROBOT_CMD_MOVE_JOINTS_T) {
                 for (int i = 0; i < SERVO_COUNT; i++) seg.q1[i] = cmd.q_target[i];
                 robot_validate_and_prepare_q(seg.q1, true);
                 seg.T = cmd.duration_s;
+                seg.tcp_target_valid = cmd.tcp_target_valid;
+                seg.mark_referenced_on_finish = cmd.mark_referenced_on_finish;
+                seg.tcp_target_base.x = cmd.x;
+                seg.tcp_target_base.y = cmd.y;
+                seg.tcp_target_base.z = cmd.z;
+                seg.tcp_target_base.pitch_deg = cmd.pitch_deg;
             }
             else {
                 ESP_LOGW(TAG, "Unknown robot command: %d", cmd.type);
@@ -747,6 +860,21 @@ static void robot_control_task(void *arg)
 
         if (s >= 1.0f) {
             for (int i = 0; i < SERVO_COUNT; i++) s_last_q[i] = s_cur.q1[i];
+
+            if (s_cur.tcp_target_valid) {
+                robot_tcp_estimate_set_base(s_cur.tcp_target_base.x,
+                                            s_cur.tcp_target_base.y,
+                                            s_cur.tcp_target_base.z,
+                                            s_cur.tcp_target_base.pitch_deg);
+            } else {
+                robot_tcp_estimate_invalidate();
+            }
+
+            if (s_cur.mark_referenced_on_finish) {
+                s_referenced = true;
+                ESP_LOGI(TAG, "Robot reference established");
+            }
+
             s_cur.active = false;
         }
     }
@@ -799,6 +927,28 @@ bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
     return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
 }
 
+bool robot_cmd_move_joints_home(const float q_target[SERVO_COUNT],
+                                float home_x_base,
+                                float home_y_base,
+                                float home_z_base,
+                                float home_pitch_deg)
+{
+    if (!s_armed) return false;
+    if (s_robot_queue == NULL) return false;
+
+    robot_cmd_t cmd = {0};
+    cmd.type = ROBOT_CMD_MOVE_JOINTS;
+    for (int i = 0; i < SERVO_COUNT; i++) cmd.q_target[i] = q_target[i];
+    cmd.tcp_target_valid = true;
+    cmd.mark_referenced_on_finish = true;
+    cmd.x = home_x_base;
+    cmd.y = home_y_base;
+    cmd.z = home_z_base;
+    cmd.pitch_deg = home_pitch_deg;
+
+    return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
+}
+
 bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg)
 {
     if (!s_armed) return false;
@@ -810,6 +960,18 @@ bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg)
     cmd.pitch_deg = pitch_deg;
 
     return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
+}
+
+bool robot_cmd_move_xyz_work(float x, float y, float z, float pitch_deg)
+{
+    if (!s_referenced) {
+        ESP_LOGW(TAG, "Rejecting work-frame move: robot not referenced");
+        return false;
+    }
+
+    float xb, yb, zb;
+    work_to_base_xyz(x, y, z, &xb, &yb, &zb);
+    return robot_cmd_move_xyz(xb, yb, zb, pitch_deg);
 }
 
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout)
@@ -871,7 +1033,8 @@ void robot_core_run_gcode(const char *filename)
         return;
     }
 
-    strncpy(params->filename, filename, 64);
+    strncpy(params->filename, filename, sizeof(params->filename) - 1);
+    params->filename[sizeof(params->filename) - 1] = 0;
 
     BaseType_t res = xTaskCreatePinnedToCore(
         gcode_executor_task,
