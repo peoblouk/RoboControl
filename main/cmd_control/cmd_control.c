@@ -79,6 +79,7 @@ static int cmd_move(int argc, char **argv)
 {
     if (argc != 4 && argc != 5) {
         printf("Usage: move <x> <y> <z> [pitch]\n");
+        printf("Note: pitch is ignored for now while simple planar IK is being tuned.\n");
         return 0;
     }
 
@@ -95,7 +96,7 @@ static int cmd_move(int argc, char **argv)
 
 #ifdef STATS_PRINT
     if (res) {
-        printf("OK: Move(work) to X=%.1f Y=%.1f Z=%.1f pitch=%.1f queued (time: %lld us)\n", x, y, z, pitch, (long long)dt_us);
+        printf("OK: Move(work) to X=%.1f Y=%.1f Z=%.1f queued (pitch %.1f ignored for now) (time: %lld us)\n", x, y, z, pitch, (long long)dt_us);
     } else {
         printf("ERR: move rejected (not referenced / queue full / not started) (time: %lld us)\n", (long long)dt_us);
     }
@@ -269,7 +270,7 @@ static int cmd_test(int argc, char **argv)
     const float DX = 40.0f;
     const float DY = 40.0f;
     const float DZ = 40.0f;
-    const float DP = 20.0f;
+    // const float DP = 20.0f;   // kept for later TCP / pitch tests
     const TickType_t W = pdMS_TO_TICKS(2500);
 
     ok &= robot_cmd_move_xyz_work(X0, Y0, ZS, P0); vTaskDelay(W);
@@ -282,8 +283,9 @@ static int cmd_test(int argc, char **argv)
     ok &= robot_cmd_move_xyz_work(X0, Y0+DY, Z0,  P0); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0-DY, Z0,  P0); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0,    Z0,  P0); vTaskDelay(W);
-    ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, +DP); vTaskDelay(W);
-    ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, -DP); vTaskDelay(W);
+    // Pitch sweep intentionally disabled while tuning only planar geometric IK.
+    // ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, +DP); vTaskDelay(W);
+    // ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, -DP); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0, Z0,  P0); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0, ZS, P0); vTaskDelay(W);
 
@@ -312,10 +314,12 @@ static int cmd_home(int argc, char **argv)
     (void)argc; (void)argv;
     float q[SERVO_COUNT];
     for (int i = 0; i < SERVO_COUNT; i++) q[i] = 90.0f;
+    q[0] = HOME_J0;
     q[1] = HOME_J1;
     q[3] = HOME_J2;
     q[4] = HOME_J3;
     q[5] = HOME_J4;
+    q[6] = HOME_J5;
     robot_validate_and_prepare_q(q, true);
     robot_cmd_queue_flush();
     bool ok = robot_cmd_move_joints_home(q,
@@ -359,9 +363,9 @@ static void register_commands(void)
 {
     const esp_console_cmd_t cmds[] = {
         { .command = "joint",  .help = "Set joint angle: joint <id> <angle>", .func = &cmd_joint },
-        { .command = "move",   .help = "Move in WORK frame: move <x> <y> <z> [pitch]", .func = &cmd_move },
+        { .command = "move",   .help = "Move in WORK frame: move <x> <y> <z> [pitch] (pitch ignored for now)", .func = &cmd_move },
         { .command = "sensors",.help = "Print joint angles from sensors", .func = &cmd_sensors },
-        { .command = "test",   .help = "Run test motion sequence in WORK frame", .func = &cmd_test },
+        { .command = "test",   .help = "Run simple XYZ test motion sequence in WORK frame", .func = &cmd_test },
         { .command = "print",  .help = "Print file content: print <path>", .func = &cmd_print_file },
         { .command = "ls",     .help = "List files in storage", .func = &cmd_ls },
         { .command = "stats",  .help = "Print timing stats for control commands", .func = &cmd_stats },

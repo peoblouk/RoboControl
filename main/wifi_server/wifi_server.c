@@ -359,10 +359,12 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             int fd = httpd_req_to_sockfd(req);
             float q[SERVO_COUNT];
             for (int i = 0; i < SERVO_COUNT; i++) q[i] = 90.0f;
+            q[0] = HOME_J0;
             q[1] = HOME_J1;
             q[3] = HOME_J2;
             q[4] = HOME_J3;
             q[5] = HOME_J4;
+            q[6] = HOME_J5;
             robot_validate_and_prepare_q(q, true);
             robot_cmd_queue_flush();
             bool ok = robot_cmd_move_joints_home(q,

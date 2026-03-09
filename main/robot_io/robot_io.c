@@ -19,7 +19,7 @@ static const int s_joint_master_servo[JOINT_COUNT] = {
     JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
 };
 
-static const int s_joint_sensor_idx[JOINT_COUNT] = { 0, 1, 2, 3, 4, 5 };
+//static const int s_joint_sensor_idx[JOINT_COUNT] = { 0, 1, 2, 3, 4, 5 };
 
 servo_t servos[SERVO_COUNT] = {
     { .gpio_num = SERVO0_GPIO, .channel = SERVO0_CH }, // J0
@@ -523,18 +523,33 @@ bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
 
 bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
 {
+    (void)pitch_deg;
+
+    // SIMPLE PLANAR IK FOR TUNING:
+    // For now we only test geometric IK in the arm plane (J0 + J1 + J2).
+    // Tool length / TCP pitch are intentionally ignored here so L0, L1, L2,
+    // DIR[] and OFF[] can be tuned first.
     float r = sqrtf(x*x + y*y);
-    float phi = DEG2RAD(pitch_deg);
-
-    float r_w  = r - L_TOOL * cosf(phi);
-    float z_w  = z - L_TOOL * sinf(phi);
-    float z_sh = z_w - L0;
-
-    float d = sqrtf(r_w*r_w + z_sh*z_sh);
+    float z_sh = z - L0;
+    float d = sqrtf(r*r + z_sh*z_sh);
 
     if (d > (L1 + L2)) return false;
     if (d < fabsf(L1 - L2)) return false;
     return true;
+
+    // FULL TCP REACHABILITY (kept for later TCP phase):
+    // float r = sqrtf(x*x + y*y);
+    // float phi = DEG2RAD(pitch_deg);
+    //
+    // float r_w  = r - L_TOOL * cosf(phi);
+    // float z_w  = z - L_TOOL * sinf(phi);
+    // float z_sh = z_w - L0;
+    //
+    // float d = sqrtf(r_w*r_w + z_sh*z_sh);
+    //
+    // if (d > (L1 + L2)) return false;
+    // if (d < fabsf(L1 - L2)) return false;
+    // return true;
 }
 
 bool robot_tcp_reachable_work(float x, float y, float z, float pitch_deg)
@@ -567,123 +582,176 @@ float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_
 // ===============================
 // INVERSE KINEMATICS
 // ===============================
-static bool inverse_kinematics_tcp(float x, float y, float z,
-                                   float tool_pitch_deg,
-                                   float q_target[SERVO_COUNT])
+static bool inverse_kinematics_simple(float x, float y, float z,
+                                      float q_target[SERVO_COUNT])
 {
     float r = sqrtf(x*x + y*y);
 
-    // base angle, keep last when x=y ~ 0
+    // Base rotation
     float q0;
     if (r < 1e-6f) {
-        float d0 = DIR[0];
-        q0 = (fabsf(d0) < 1e-6f) ? 0.0f : DEG2RAD((s_last_q[0] - OFF[0]) / d0);
+        float d0 = DIR[SERVO_J0];
+        q0 = (fabsf(d0) < 1e-6f) ? 0.0f
+                                 : DEG2RAD((s_last_q[SERVO_J0] - OFF[SERVO_J0]) / d0);
     } else {
         q0 = atan2f(y, x);
     }
 
-    float phi = DEG2RAD(tool_pitch_deg);
-
-    // wrist (pitch pivot) from TCP
-    float r_w  = r - (float)L_TOOL * cosf(phi);
-    float z_w  = z - (float)L_TOOL * sinf(phi);
-    float z_sh = z_w - L0;
-
-    float d2 = r_w*r_w + z_sh*z_sh;
-    float d  = sqrtf(d2);
+    // Simple planar IK for point J3
+    float z_sh = z - L0;
+    float d2   = r*r + z_sh*z_sh;
+    float d    = sqrtf(d2);
 
     if (d > (L1 + L2)) return false;
     if (d < fabsf(L1 - L2)) return false;
 
-    float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f*L1*L2);
+    float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f * L1 * L2);
     if (cos_q2 >  1.0f) cos_q2 =  1.0f;
     if (cos_q2 < -1.0f) cos_q2 = -1.0f;
 
-    // elbow angle in [0..pi]
-    float q2 = acosf(cos_q2);
+    float phi = atan2f(z_sh, r);
 
-    float phi2 = atan2f(z_sh, r_w);
-    float psi  = atan2f(L2*sinf(q2), L1 + L2*cosf(q2));
+    // Lock elbow branch to match current calibration:
+    // With current config:
+    //   SERVO_OFF_INIT = {75,175,175,149,...}
+    //   SERVO_DIR_INIT = {1,-1,-1,1,...}
+    // and measured "L" pose:
+    //   J1 servo = 85, J2 servo = 59
+    // this corresponds to:
+    //   q1_math = +90 deg
+    //   q2_math = -90 deg
+    float q2 = -acosf(cos_q2);
+    float psi = atan2f(L2 * sinf(q2), L1 + L2 * cosf(q2));
+    float q1 = phi - psi;
 
-    // two elbow configurations: q1 = phi2 ± psi
-    float q1_opts[2] = { (phi2 - psi), (phi2 + psi) };
+    float j0 = RAD2DEG(q0);
+    float j1 = RAD2DEG(q1);
+    float j2 = RAD2DEG(q2);
 
-    float best_q[SERVO_COUNT];
-    float best_cost = 1e30f;
-    bool  best_ok = false;
+    float cand[SERVO_COUNT];
+    for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
 
-    for (int e = 0; e < 2; e++) {
-        float q1 = q1_opts[e];
+    cand[SERVO_J0]   = map_servo(SERVO_J0,   j0);
+    cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
+    cand[SERVO_J2]   = map_servo(SERVO_J2,   j2);
 
-        // raw q3
-        float q3_raw = phi - q1 - q2;
+    // Wrist / tool ignored for now during simple IK tuning
+    cand[SERVO_J3] = HOME_J3;
+    cand[SERVO_J4] = HOME_J4;
+    cand[SERVO_J5] = HOME_J5;
 
-        // try q3 wrapped by ±2π to fit limits / reduce motion
-        for (int k = -1; k <= 1; k++) {
-            float q3 = q3_raw + (float)k * 2.0f * (float)M_PI;
+    ESP_LOGW(TAG,
+             "IK dbg j0=%.1f j1=%.1f j2=%.1f | cand s0=%.1f s1=%.1f s2=%.1f s3=%.1f s4=%.1f s5=%.1f s6=%.1f",
+             j0, j1, j2,
+             cand[0], cand[1], cand[2], cand[3], cand[4], cand[5], cand[6]);
 
-            float j0 = RAD2DEG(q0);
-            float j1 = RAD2DEG(q1);
-            float j2 = RAD2DEG(q2);
-            float j3 = RAD2DEG(q3);
+    float dbg[SERVO_COUNT];
+    for (int i = 0; i < SERVO_COUNT; i++) dbg[i] = cand[i];
 
-            float cand[SERVO_COUNT];
-            for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
+    bool valid = robot_validate_and_prepare_q(dbg, false);
 
-            cand[0]          = map_servo(0, j0);
-            cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
-            cand[3]          = map_servo(3, j2);
-            cand[4]          = map_servo(4, j3);
+    ESP_LOGW(TAG,
+             "IK dbg valid=%d | validated s0=%.1f s1=%.1f s2=%.1f s3=%.1f s4=%.1f s5=%.1f s6=%.1f",
+             (int)valid,
+             dbg[0], dbg[1], dbg[2], dbg[3], dbg[4], dbg[5], dbg[6]);
 
-            // reject if any joint out of range (no clamping here)
-            if (!robot_validate_and_prepare_q(cand, false)) continue;
+    if (!valid) return false;
 
-            // cost = minimal change from current pose (servo space)
-            float cost = 0.0f;
-            cost += fabsf(cand[0]          - s_last_q[0]);
-            cost += fabsf(cand[J1_A_SERVO] - s_last_q[J1_A_SERVO]);
-            cost += fabsf(cand[3]          - s_last_q[3]);
-            cost += fabsf(cand[4]          - s_last_q[4]);
-
-            if (cost < best_cost) {
-                best_cost = cost;
-                for (int i = 0; i < SERVO_COUNT; i++) best_q[i] = cand[i];
-                best_ok = true;
-            }
-        }
-    }
-
-    if (!best_ok) return false;
-
-    for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = best_q[i];
+    for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = cand[i];
     return true;
 }
 
-// void inverse_kinematics(float x, float y, float z, float q_target[SERVO_COUNT])
+// FULL TCP IK KEPT FOR LATER TCP / TOOL PHASE:
+// static bool inverse_kinematics_tcp(float x, float y, float z,
+//                                    float tool_pitch_deg,
+//                                    float q_target[SERVO_COUNT])
 // {
-//     float q0 = atan2f(y, x);
-
-//     float R    = sqrtf(x*x + y*y);
-//     float z_sh = z - L0;
-//     float d    = sqrtf(R*R + z_sh*z_sh);
-
-//     float cos_q2 = (d*d - L1*L1 - L2*L2) / (2.0f*L1*L2);
-//     if (cos_q2 > 1.0f)  cos_q2 = 1.0f;
+//     float r = sqrtf(x*x + y*y);
+//
+//     // base angle, keep last when x=y ~ 0
+//     float q0;
+//     if (r < 1e-6f) {
+//         float d0 = DIR[0];
+//         q0 = (fabsf(d0) < 1e-6f) ? 0.0f : DEG2RAD((s_last_q[0] - OFF[0]) / d0);
+//     } else {
+//         q0 = atan2f(y, x);
+//     }
+//
+//     float phi = DEG2RAD(tool_pitch_deg);
+//
+//     // wrist (pitch pivot) from TCP
+//     float r_w  = r - (float)L_TOOL * cosf(phi);
+//     float z_w  = z - (float)L_TOOL * sinf(phi);
+//     float z_sh = z_w - L0;
+//
+//     float d2 = r_w*r_w + z_sh*z_sh;
+//     float d  = sqrtf(d2);
+//
+//     if (d > (L1 + L2)) return false;
+//     if (d < fabsf(L1 - L2)) return false;
+//
+//     float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f*L1*L2);
+//     if (cos_q2 >  1.0f) cos_q2 =  1.0f;
 //     if (cos_q2 < -1.0f) cos_q2 = -1.0f;
-
+//
+//     // elbow angle in [0..pi]
 //     float q2 = acosf(cos_q2);
-
-//     float phi = atan2f(z_sh, R);
-//     float psi = atan2f(L2*sinf(q2), L1 + L2*cosf(q2));
-//     float q1  = phi - psi;
-
-//     float j0 = RAD2DEG(q0);
-//     float j1 = RAD2DEG(q1);
-//     float j2 = RAD2DEG(q2);
-
-//     q_target[0]          = map_servo(0, j0);
-//     q_target[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
-//     q_target[3]          = map_servo(3, j2);
+//
+//     float phi2 = atan2f(z_sh, r_w);
+//     float psi  = atan2f(L2*sinf(q2), L1 + L2*cosf(q2));
+//
+//     // two elbow configurations: q1 = phi2 ± psi
+//     float q1_opts[2] = { (phi2 - psi), (phi2 + psi) };
+//
+//     float best_q[SERVO_COUNT];
+//     float best_cost = 1e30f;
+//     bool  best_ok = false;
+//
+//     for (int e = 0; e < 2; e++) {
+//         float q1 = q1_opts[e];
+//
+//         // raw q3
+//         float q3_raw = phi - q1 - q2;
+//
+//         // try q3 wrapped by ±2π to fit limits / reduce motion
+//         for (int k = -1; k <= 1; k++) {
+//             float q3 = q3_raw + (float)k * 2.0f * (float)M_PI;
+//
+//             float j0 = RAD2DEG(q0);
+//             float j1 = RAD2DEG(q1);
+//             float j2 = RAD2DEG(q2);
+//             float j3 = RAD2DEG(q3);
+//
+//             float cand[SERVO_COUNT];
+//             for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
+//
+//             cand[0]          = map_servo(0, j0);
+//             cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
+//             cand[3]          = map_servo(3, j2);
+//             cand[4]          = map_servo(4, j3);
+//
+//             // reject if any joint out of range (no clamping here)
+//             if (!robot_validate_and_prepare_q(cand, false)) continue;
+//
+//             // cost = minimal change from current pose (servo space)
+//             float cost = 0.0f;
+//             cost += fabsf(cand[0]          - s_last_q[0]);
+//             cost += fabsf(cand[J1_A_SERVO] - s_last_q[J1_A_SERVO]);
+//             cost += fabsf(cand[3]          - s_last_q[3]);
+//             cost += fabsf(cand[4]          - s_last_q[4]);
+//
+//             if (cost < best_cost) {
+//                 best_cost = cost;
+//                 for (int i = 0; i < SERVO_COUNT; i++) best_q[i] = cand[i];
+//                 best_ok = true;
+//             }
+//         }
+//     }
+//
+//     if (!best_ok) return false;
+//
+//     for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = best_q[i];
+//     return true;
 // }
 
 // ===============================
@@ -797,11 +865,13 @@ static void robot_control_task(void *arg)
                 if (pitch > 89.0f)  pitch = 89.0f;
                 if (pitch < -89.0f) pitch = -89.0f;
 
-                ESP_LOGW(TAG, "IK TCP(base): x=%.1f y=%.1f z=%.1f pitch=%.1f",
+                ESP_LOGW(TAG, "IK SIMPLE(base): x=%.1f y=%.1f z=%.1f (pitch %.1f ignored for now)",
                          cmd.x, cmd.y, cmd.z, pitch);
 
-                bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
-                if (!ok) { ESP_LOGW(TAG, "IK TCP failed"); continue; }
+                bool ok = inverse_kinematics_simple(cmd.x, cmd.y, cmd.z, seg.q1);
+                // Future TCP version kept above as comments:
+                // bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
+                if (!ok) { ESP_LOGW(TAG, "IK SIMPLE failed"); continue; }
 
                 ESP_LOGW(TAG, "IK servo: s0(J0)=%.1f s1(J1)=%.1f s3(J2)=%.1f s4(J3)=%.1f",
                          seg.q1[0], seg.q1[1], seg.q1[3], seg.q1[4]);
@@ -812,6 +882,8 @@ static void robot_control_task(void *arg)
                 seg.tcp_target_base.x = cmd.x;
                 seg.tcp_target_base.y = cmd.y;
                 seg.tcp_target_base.z = cmd.z;
+                // During simple planar IK tuning, pitch is not really solved.
+                // We still keep it in the estimate as metadata so the current API stays intact.
                 seg.tcp_target_base.pitch_deg = pitch;
             }
             else if (cmd.type == ROBOT_CMD_MOVE_JOINTS_T) {
@@ -1017,7 +1089,11 @@ bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SER
 {
     for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = robot_get_est_angle(i);
 
-    if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
+    (void)pitch_deg;
+
+    if (!inverse_kinematics_simple(x, y, z, q_target)) return false;
+    // Future TCP version kept above as comments:
+    // if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
 
     robot_validate_and_prepare_q(q_target, true);
     return true;

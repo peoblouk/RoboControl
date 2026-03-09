@@ -116,8 +116,8 @@
 //     SERVO3_DIR, SERVO4_DIR, SERVO5_DIR, SERVO6_DIR
 // }
 
-#define SERVO_OFF_INIT { 75.0f, 100.0f, 100.0f, 15.0f, 90.0f, 90.0f, 90.0f }
-#define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  0.8889f, -0.5f,  1.0f,  1.0f }
+#define SERVO_OFF_INIT { 75.0f, 175.0f, 175.0f, 149.0f, 90.0f, 90.0f, 90.0f }
+#define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f }
 
 // ===============================
 // ROBOT: J1 FOLLOWER
@@ -255,14 +255,33 @@
 // ===============================
 #define ROBOT_USE_SENSORS 0
 
-#define ROBOT_WORK_OFFSET_X_DEFAULT 220.0f
+#define ROBOT_WORK_OFFSET_X_DEFAULT 0.0f
 #define ROBOT_WORK_OFFSET_Y_DEFAULT 0.0f
-#define ROBOT_WORK_OFFSET_Z_DEFAULT 25.0f
+#define ROBOT_WORK_OFFSET_Z_DEFAULT 0.0f
 
-#define ROBOT_HOME_X_BASE_DEFAULT   220.0f
+#define ROBOT_HOME_X_BASE_DEFAULT   0.0f
 #define ROBOT_HOME_Y_BASE_DEFAULT   0.0f
-#define ROBOT_HOME_Z_BASE_DEFAULT   80.0f
+#define ROBOT_HOME_Z_BASE_DEFAULT   0.0f
 #define ROBOT_HOME_PITCH_DEG_DEFAULT 0.0f
+
+// // bez tool
+// #define ROBOT_WORK_OFFSET_X_DEFAULT 140.0f
+// #define ROBOT_WORK_OFFSET_Y_DEFAULT   0.0f
+// #define ROBOT_WORK_OFFSET_Z_DEFAULT  25.0f
+
+// #define ROBOT_HOME_X_BASE_DEFAULT   140.0f
+// #define ROBOT_HOME_Y_BASE_DEFAULT     0.0f
+// #define ROBOT_HOME_Z_BASE_DEFAULT    80.0f
+
+// // s tool
+// #define ROBOT_WORK_OFFSET_X_DEFAULT 220.0f
+// #define ROBOT_WORK_OFFSET_Y_DEFAULT 0.0f
+// #define ROBOT_WORK_OFFSET_Z_DEFAULT 25.0f
+
+// #define ROBOT_HOME_X_BASE_DEFAULT   220.0f
+// #define ROBOT_HOME_Y_BASE_DEFAULT   0.0f
+// #define ROBOT_HOME_Z_BASE_DEFAULT   80.0f
+// #define ROBOT_HOME_PITCH_DEG_DEFAULT 0.0f
 
 // Home pose v servo prostoru:
 // s0, s1, s2(follower), s3, s4, s5, s6
