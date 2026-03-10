@@ -611,15 +611,6 @@ static bool inverse_kinematics_simple(float x, float y, float z,
 
     float phi = atan2f(z_sh, r);
 
-    // Lock elbow branch to match current calibration:
-    // With current config:
-    //   SERVO_OFF_INIT = {75,175,175,149,...}
-    //   SERVO_DIR_INIT = {1,-1,-1,1,...}
-    // and measured "L" pose:
-    //   J1 servo = 85, J2 servo = 59
-    // this corresponds to:
-    //   q1_math = +90 deg
-    //   q2_math = -90 deg
     float q2 = -acosf(cos_q2);
     float psi = atan2f(L2 * sinf(q2), L1 + L2 * cosf(q2));
     float q1 = phi - psi;
@@ -635,15 +626,14 @@ static bool inverse_kinematics_simple(float x, float y, float z,
     cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
     cand[SERVO_J2]   = map_servo(SERVO_J2,   j2);
 
-    // Wrist / tool ignored for now during simple IK tuning
     cand[SERVO_J3] = HOME_J3;
     cand[SERVO_J4] = HOME_J4;
     cand[SERVO_J5] = HOME_J5;
 
-    ESP_LOGW(TAG,
-             "IK dbg j0=%.1f j1=%.1f j2=%.1f | cand s0=%.1f s1=%.1f s2=%.1f s3=%.1f s4=%.1f s5=%.1f s6=%.1f",
-             j0, j1, j2,
-             cand[0], cand[1], cand[2], cand[3], cand[4], cand[5], cand[6]);
+    // ESP_LOGW(TAG,
+    //          "IK dbg j0=%.1f j1=%.1f j2=%.1f | cand s0=%.1f s1=%.1f s2=%.1f s3=%.1f s4=%.1f s5=%.1f s6=%.1f",
+    //          j0, j1, j2,
+    //          cand[0], cand[1], cand[2], cand[3], cand[4], cand[5], cand[6]);
 
     float dbg[SERVO_COUNT];
     for (int i = 0; i < SERVO_COUNT; i++) dbg[i] = cand[i];
@@ -667,89 +657,86 @@ static bool inverse_kinematics_simple(float x, float y, float z,
 //                                    float q_target[SERVO_COUNT])
 // {
 //     float r = sqrtf(x*x + y*y);
-//
-//     // base angle, keep last when x=y ~ 0
+
+//     // Base rotation
 //     float q0;
 //     if (r < 1e-6f) {
-//         float d0 = DIR[0];
-//         q0 = (fabsf(d0) < 1e-6f) ? 0.0f : DEG2RAD((s_last_q[0] - OFF[0]) / d0);
+//         float d0 = DIR[SERVO_J0];
+//         q0 = (fabsf(d0) < 1e-6f) ? 0.0f
+//                                  : DEG2RAD((s_last_q[SERVO_J0] - OFF[SERVO_J0]) / d0);
 //     } else {
 //         q0 = atan2f(y, x);
 //     }
-//
-//     float phi = DEG2RAD(tool_pitch_deg);
-//
-//     // wrist (pitch pivot) from TCP
-//     float r_w  = r - (float)L_TOOL * cosf(phi);
-//     float z_w  = z - (float)L_TOOL * sinf(phi);
-//     float z_sh = z_w - L0;
-//
-//     float d2 = r_w*r_w + z_sh*z_sh;
-//     float d  = sqrtf(d2);
-//
+
+//     if (!isfinite(tool_pitch_deg)) tool_pitch_deg = ROBOT_DEFAULT_PITCH_DEG;
+//     if (tool_pitch_deg >  89.0f) tool_pitch_deg =  89.0f;
+//     if (tool_pitch_deg < -89.0f) tool_pitch_deg = -89.0f;
+
+//     const float phi = DEG2RAD(tool_pitch_deg);
+
+//     // Wrist pitch pivot from TCP
+//     const float r_w  = r - (float)L_TOOL * cosf(phi);
+//     const float z_w  = z - (float)L_TOOL * sinf(phi);
+//     const float z_sh = z_w - L0;
+
+//     const float d2 = r_w*r_w + z_sh*z_sh;
+//     const float d  = sqrtf(d2);
+
 //     if (d > (L1 + L2)) return false;
 //     if (d < fabsf(L1 - L2)) return false;
-//
-//     float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f*L1*L2);
+
+//     float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f * L1 * L2);
 //     if (cos_q2 >  1.0f) cos_q2 =  1.0f;
 //     if (cos_q2 < -1.0f) cos_q2 = -1.0f;
-//
-//     // elbow angle in [0..pi]
-//     float q2 = acosf(cos_q2);
-//
-//     float phi2 = atan2f(z_sh, r_w);
-//     float psi  = atan2f(L2*sinf(q2), L1 + L2*cosf(q2));
-//
-//     // two elbow configurations: q1 = phi2 ± psi
-//     float q1_opts[2] = { (phi2 - psi), (phi2 + psi) };
-//
+
+//     // Same elbow branch as the now-working simple IK
+//     const float q2  = -acosf(cos_q2);
+//     const float phi2 = atan2f(z_sh, r_w);
+//     const float psi  = atan2f(L2 * sinf(q2), L1 + L2 * cosf(q2));
+//     const float q1   = phi2 - psi;
+
+//     // Wrist pitch to match requested TCP pitch
+//     const float q3_raw = phi - q1 - q2;
+
 //     float best_q[SERVO_COUNT];
 //     float best_cost = 1e30f;
 //     bool  best_ok = false;
-//
-//     for (int e = 0; e < 2; e++) {
-//         float q1 = q1_opts[e];
-//
-//         // raw q3
-//         float q3_raw = phi - q1 - q2;
-//
-//         // try q3 wrapped by ±2π to fit limits / reduce motion
-//         for (int k = -1; k <= 1; k++) {
-//             float q3 = q3_raw + (float)k * 2.0f * (float)M_PI;
-//
-//             float j0 = RAD2DEG(q0);
-//             float j1 = RAD2DEG(q1);
-//             float j2 = RAD2DEG(q2);
-//             float j3 = RAD2DEG(q3);
-//
-//             float cand[SERVO_COUNT];
-//             for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
-//
-//             cand[0]          = map_servo(0, j0);
-//             cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
-//             cand[3]          = map_servo(3, j2);
-//             cand[4]          = map_servo(4, j3);
-//
-//             // reject if any joint out of range (no clamping here)
-//             if (!robot_validate_and_prepare_q(cand, false)) continue;
-//
-//             // cost = minimal change from current pose (servo space)
-//             float cost = 0.0f;
-//             cost += fabsf(cand[0]          - s_last_q[0]);
-//             cost += fabsf(cand[J1_A_SERVO] - s_last_q[J1_A_SERVO]);
-//             cost += fabsf(cand[3]          - s_last_q[3]);
-//             cost += fabsf(cand[4]          - s_last_q[4]);
-//
-//             if (cost < best_cost) {
-//                 best_cost = cost;
-//                 for (int i = 0; i < SERVO_COUNT; i++) best_q[i] = cand[i];
-//                 best_ok = true;
-//             }
+
+//     // Try wrapped wrist solutions so servo limits can still be satisfied
+//     for (int k = -1; k <= 1; k++) {
+//         const float q3 = q3_raw + (float)k * 2.0f * (float)M_PI;
+
+//         const float j0 = RAD2DEG(q0);
+//         const float j1 = RAD2DEG(q1);
+//         const float j2 = RAD2DEG(q2);
+//         const float j3 = RAD2DEG(q3);
+
+//         float cand[SERVO_COUNT];
+//         for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
+
+//         cand[SERVO_J0]   = map_servo(SERVO_J0,   j0);
+//         cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
+//         cand[SERVO_J2]   = map_servo(SERVO_J2,   j2);
+//         cand[SERVO_J3]   = map_servo(SERVO_J3,   j3);
+
+//         // J4/J5 nechávám tak jak jsou teď
+//         if (!robot_validate_and_prepare_q(cand, false)) continue;
+
+//         float cost = 0.0f;
+//         cost += fabsf(cand[SERVO_J0]   - s_last_q[SERVO_J0]);
+//         cost += fabsf(cand[J1_A_SERVO] - s_last_q[J1_A_SERVO]);
+//         cost += fabsf(cand[SERVO_J2]   - s_last_q[SERVO_J2]);
+//         cost += fabsf(cand[SERVO_J3]   - s_last_q[SERVO_J3]);
+
+//         if (cost < best_cost) {
+//             best_cost = cost;
+//             for (int i = 0; i < SERVO_COUNT; i++) best_q[i] = cand[i];
+//             best_ok = true;
 //         }
 //     }
-//
+
 //     if (!best_ok) return false;
-//
+
 //     for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = best_q[i];
 //     return true;
 // }
@@ -1127,3 +1114,5 @@ void robot_core_run_gcode(const char *filename)
         free(params);
     }
 }
+
+// mám papír a ten je 0,5 mm čtvrečkovaný jde o to že když se podívám na osu J0 (střed serva 0 ) tak je vzdálená od toho papíru cca 70 mm a pak je do výšky p7

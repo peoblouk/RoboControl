@@ -90,34 +90,36 @@
 // ROBOT: SERVO MAPPING (OFF / DIR)
 // ===============================
 // joint_deg_math -> servo_deg = OFF + DIR * joint_deg_math
-// #define SERVO0_OFF_DEG  75.0f
-// #define SERVO1_OFF_DEG  180.0f
-// #define SERVO2_OFF_DEG  180.0f
-// #define SERVO3_OFF_DEG  155.0f // 160
-// #define SERVO4_OFF_DEG  70.0f
-// #define SERVO5_OFF_DEG  98.0f
-// #define SERVO6_OFF_DEG  0.0f
+#define SERVO0_OFF_DEG  75.0f
+#define SERVO1_OFF_DEG  175.0f
+#define SERVO2_OFF_DEG  175.0f
+#define SERVO3_OFF_DEG  149.0f
 
-// #define SERVO0_DIR      -1.0f
-// #define SERVO1_DIR      -1.0f
-// #define SERVO2_DIR      -1.0f
-// #define SERVO3_DIR      +1.0f
-// #define SERVO4_DIR      -1.0f
-// #define SERVO5_DIR      +1.0f
-// #define SERVO6_DIR      +1.0f
+// Future wrist/tool calibration
+#define SERVO4_OFF_DEG  70.0f
+#define SERVO5_OFF_DEG  98.0f
+#define SERVO6_OFF_DEG  0.0f
 
-// #define SERVO_OFF_INIT { 
-//     SERVO0_OFF_DEG, SERVO1_OFF_DEG, SERVO2_OFF_DEG, 
-//     SERVO3_OFF_DEG, SERVO4_OFF_DEG, SERVO5_OFF_DEG, SERVO6_OFF_DEG 
-// }
+#define SERVO0_DIR      +1.0f
+#define SERVO1_DIR      -1.0f
+#define SERVO2_DIR      -1.0f
+#define SERVO3_DIR      +1.0f
+#define SERVO4_DIR      -1.0f
+#define SERVO5_DIR      +1.0f
+#define SERVO6_DIR      +1.0f
 
-// #define SERVO_DIR_INIT { 
-//     SERVO0_DIR, SERVO1_DIR, SERVO2_DIR, 
-//     SERVO3_DIR, SERVO4_DIR, SERVO5_DIR, SERVO6_DIR
-// }
+#define SERVO_OFF_INIT { \
+    SERVO0_OFF_DEG, SERVO1_OFF_DEG, SERVO2_OFF_DEG, \
+    SERVO3_OFF_DEG, SERVO4_OFF_DEG, SERVO5_OFF_DEG, SERVO6_OFF_DEG \
+}
 
-#define SERVO_OFF_INIT { 75.0f, 175.0f, 175.0f, 149.0f, 90.0f, 90.0f, 90.0f }
-#define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f }
+#define SERVO_DIR_INIT { \
+    SERVO0_DIR, SERVO1_DIR, SERVO2_DIR, \
+    SERVO3_DIR, SERVO4_DIR, SERVO5_DIR, SERVO6_DIR \
+}
+
+// #define SERVO_OFF_INIT { 75.0f, 175.0f, 175.0f, 149.0f, 90.0f, 90.0f, 90.0f }
+// #define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f } // correct for "L" pose with current calibration | move 74.5 0 182.5 |
 
 // ===============================
 // ROBOT: J1 FOLLOWER
@@ -245,7 +247,7 @@
 #define HOME_J0 75
 #define HOME_J1 80
 #define HOME_J2 30
-#define HOME_J3 120
+#define HOME_J3 0// 120 //  
 #define HOME_J4 90
 #define HOME_J5 90
 #define HOME_J6 90
