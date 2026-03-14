@@ -3,158 +3,270 @@
 # RoboControl
 
 <p align="right">
-  <img src="spiffs/web/robocontrol.ico" alt="Web server interface" width="50"/>
+  <img src="spiffs/web/robocontrol.ico" alt="RoboControl icon" width="50" />
 </p>
-Tento projekt je ukázka řízení 6DOF robotického ramene pomocí <b>ESP32-S3</b>.  
-Implementuje ovládání servomotorů, čtení senzorů a základní inverzní kinematiku.  
-Komunikace probíhá přes <b>WebSocket/HTTP server</b> a <b>UART/konzolové</b> příkazy.
 
+RoboControl je projekt pro rizeni 6DOF robotickeho ramene na ESP32-S3.
+Aktualni verze pouziva:
+
+- Web UI + WebSocket (`/ws`)
+- UART konzoli pres `esp_console` REPL (linenoise)
+- planner s frontou pohybu, arm/disarm bezpecnost a HOME/reference workflow
+- stavovou onboard RGB LED (WS2812)
+
+---
+
+## Co je hotove
+
+- Rizeni 6 kloubu (+ follower servo pro J1 a rezerva pro gripper)
+- Jednoducha planarni IK (`move_xyz`) s work offsetem
+- HOME prikaz, ktery zalozi referenci robota
+- G-code pipeline (`run file`, `line`, `stop`, `reset`, `sync`)
+- SoftAP HTTP server + WebSocket telemetrie
+- File manager pro `.txt` a `.gcode` ve SPIFFS
+- Stavova RGB LED na desce ESP32-S3-DevKitC-1
 
 ---
 
 ## Struktura projektu
 
-```
+```text
 main/
-├── main.c # Vstupní bod (app_main)
-├── robot_io/ # Serva a senzory, IK a řízení
-│ ├── robot_io.c
-│ └── robot_io.h
-├── wifi_server/ # HTTP + WebSocket server + file manager
-│ ├── wifi_server.c
-│ └── wifi_server.h
-├── cmd_control/ # Konzolové příkazy (esp_console) a CLI
-│ ├── cmd_control.c
-│ └── cmd_control.h
-├── rt_stats/ # Real-time statistiky (měření latencí)
-│ ├── rt_stats.c
-│ └── rt_stats.h
-└── CMakeLists.txt
+|-- main.c
+|-- config.h
+|-- robot_io/
+|   |-- robot_io.c
+|   `-- robot_io.h
+|-- wifi_server/
+|   |-- wifi_server.c
+|   `-- wifi_server.h
+|-- cmd_control/
+|   |-- cmd_control.c
+|   `-- cmd_control.h
+|-- gcode/
+|   |-- gcode.c
+|   `-- gcode.h
+|-- status_led/
+|   |-- status_led.c
+|   `-- status_led.h
+`-- rt_stats/
+    |-- rt_stats.c
+    `-- rt_stats.h
 ```
 
 ---
 
-## Hardware
+## Hardware map
 
 <p align="center">
-  <img src="img/RobotControl_3D.png" alt="3D Render" width="700"/>
+  <img src="img/RobotControl_3D.png" alt="3D Render" width="700" />
 </p>
 
-- **ESP32-S3 DevKitC**
-- 6× servo motor (GPIO 35–41)
-- senzory (ADC kanály)
-- volitelně USB-TTL převodník (CP2102/CH340) pro UART/konzoli
+### Serva (LEDC PWM)
 
-### Serva (PWM přes LEDC)
+| Servo ID | GPIO | Poznamka |
+| --- | --- | --- |
+| 0 | 35 | J0 |
+| 1 | 36 | J1 master |
+| 2 | 37 | J1 follower |
+| 3 | 39 | J2 |
+| 4 | 40 | J3 |
+| 5 | 41 | J4 |
+| 6 | 42 | J5 / gripper |
 
-| Servo ID | GPIO pin | LEDC Channel                    |
-| -------- | -------- | ------------------------------- |
-| 0        | 35       | 0                               |
-| 1        | 36       | 1                               |
-| 2        | 37       | 2                               |
-| 3        | 39       | 3                               |
-| 4        | 40       | 4                               |
-| 5        | 41       | 5                               |
-| (6)      | 42       | 6 _(rezervace pro manipulátor)_ |
+### Senzory (ADC map v konfiguraci)
+
+| Sensor ID | ADC unit | ADC channel | GPIO |
+| --- | --- | --- | --- |
+| 0 | 1 | 3 | IO4 |
+| 1 | 1 | 4 | IO5 |
+| 2 | 1 | 5 | IO6 |
+| 3 | 1 | 6 | IO7 |
+| 4 | 1 | 7 | IO12 |
+| 5 | 2 | 6 | IO17 |
+
+Poznamka:
+- V `main.c` je `sensors_init()` aktualne vypnute.
+- Web telemetrie proto pouziva odhadnute kloubove uhly (`robot_get_est_angle`), ne live ADC.
+
+### Onboard RGB LED
+
+- WS2812 data pin: `GPIO38` (`STATUS_LED_WS2812_GPIO`)
+- Stavy LED:
+- `DISARMED` = cervena
+- `ARMED` = zelena
+- `OPERATING` = oranzova blikani
 
 ---
 
-### Senzory (ADC)
+## Robot stavy a bezpecnost
 
-| Sensor ID | ADC Unit | ADC Channel | GPIO pin           |
-| --------- | -------- | ----------- | ------------------ |
-| 0         | 1        | 3           | IO4                |
-| 1         | 1        | 4           | IO5                |
-| 2         | 1        | 5           | IO6                |
-| 3         | 1        | 6           | IO7                |
-| 4         | 1        | 7           | IO12               |
-| 5         | 2        | 6           | IO17               |
-| (6)       | 2        | 7           | IO18 _(rezervace)_ |
+- `disarm` vypne PWM vystupy a zahodi frontu pohybu.
+- `arm` znovu povoli rizeni pohybu.
+- Prikazy `joint` a `move` jsou blokovane, kdyz je robot disarmed.
+- `move` pracuje ve WORK souradnicich a vyzaduje referenci.
+- Referenci nastavuje `home` (po dokonceni HOME segmentu).
+
+Stav vraceny pres WS:
+- `DISARMED`
+- `OPERATING`
+- `UNREFERENCED`
+- `POSE_UNKNOWN`
+- `IDLE`
 
 ---
 
-## Funkce
+## Aktualni omezeni
 
-### Inverzní kinematika (triangulační)
+- `move <x y z [pitch]>` aktualne pouziva simple planarni IK; pitch je zatim metadata a neni plne resen v IK.
+- `sensors_init()` je v `main.c` vypnute, takze system bezi defaultne v sensorless rezimu (web ukazuje odhadnute uhly).
+
+---
+
+## Konzole (UART REPL)
+
+Konzole bezi pres `esp_console` REPL:
+
+- prompt `>`
+- historie prikazu: 5 polozek
+- editace radku + sipky (linenoise)
+- logy jsou tisknute tak, aby nerozbily rozepsany radek
+
+### Dostupne prikazy
+
+- `joint <id> <angle>`
+- `move <x> <y> <z> [pitch]`
+- `home`
+- `arm`
+- `disarm`
+- `state`
+- `wcofs [x y z]`
+- `gcode run <file>`
+- `gcode line <...>`
+- `gcode stop`
+- `gcode reset`
+- `gcode sync`
+- `ls`
+- `print <path>`
+- `tasks`
+- `stats`
+- `test`
+- `sensors` (ADC; ma smysl az pri zapnutem `sensors_init()`)
+
+---
+
+## Wi-Fi a web
+
+SoftAP default:
+
+- SSID: `RoboControl`
+- heslo: `Robo-Control123`
+- mDNS: `http://robo-control.local/`
+- fallback IP: typicky `http://192.168.4.1/` (default AP IP ESP-IDF)
+
+HTTP endpointy:
+
+- `GET /` -> hlavni stranka (`spage.html`)
+- `GET /settings` -> settings stranka
+- `GET /status` -> `{ "online": true/false }`
+- `POST /wifi_reset`
+- `GET|POST /wifi_config`
+- `GET /api/limits`
+- `POST /upload`
+- `GET /files`
+- `GET|PUT|DELETE /file/<name>`
+- `WS /ws`
+
+---
+
+## WebSocket API
+
+### Prikazy klient -> server
+
+- `{"joint":1,"angle":90}`
+- `{"servo":3,"angle":90}` (kompatibilni alias)
+- `{"cmd":"sensors"}`
+- `{"cmd":"move_xyz","x":10,"y":20,"z":30,"pitch":0}`
+- `{"cmd":"home"}`
+- `{"cmd":"arm"}`
+- `{"cmd":"disarm"}`
+- `{"cmd":"set_work_offset","x":0,"y":0,"z":0}`
+- `{"cmd":"gcode_line","line":"G1 X10 Y5"}`
+- `{"cmd":"run_gcode","filename":"test.gcode"}`
+- `{"cmd":"gcode_stop"}`
+
+### Telemetrie server -> klient (periodicky)
+
+Posila se cca kazdych 200 ms:
+
+```json
+{
+  "state": "IDLE",
+  "armed": true,
+  "referenced": true,
+  "tcp_est_valid": true,
+  "work_offset": { "x": 0, "y": 0, "z": 0 },
+  "tcp_work": { "x": 0, "y": 0, "z": 0, "pitch": 0 },
+  "sensors": [{ "id": 0, "angle": 75.0 }]
+}
+```
+
+---
+
+## G-code (aktualne podporovana podmnozina)
+
+Parser umi:
+
+- `G0`, `G1`
+- `G90`, `G91`
+- `G20`, `G21`
+- `F`, `X`, `Y`, `Z`, `P`
+- komentare za `;`
+
+Dulezite:
+
+- G-code bezi ve WORK souradnicich.
+- Pred spustenim musi byt robot referencovany (`home`) a mit znamou TCP pozici.
+- Pri chybe dosahu nebo timeoutu se fronta flushne a beh se zastavi.
+
+---
+
+## File manager (SPIFFS)
+
+- Datovy adresar: `/spiffs/data`
+- Povoleny upload/extenze: `.txt`, `.gcode`
+- `GET /files` vraci seznam souboru a velikosti
+- `GET /file/<name>` vraci obsah
+- `PUT /file/<name>` ulozi soubor
+- `DELETE /file/<name>` smaze soubor
+
+---
+
+## Build a flash
+
+```bash
+idf.py set-target esp32s3
+idf.py build
+idf.py flash monitor
+```
+
+---
+
+## Wokwi
+
+Projekt obsahuje:
+
+- `diagram.json`
+- `wokwi.toml`
+
+V simulaci je pouzita deska `board-esp32-s3-devkitc-1` a stejne pin mapovani jako v `config.h`.
+
+---
 
 <p align="center">
-  <img src="img/IK_calculation.png" alt="Inverse kinematic" width="700"/>
+  <img src="img/Web_interface.png" alt="Web UI" width="700" />
 </p>
 
-- Základní triangulační IK pro výpočet úhlů z (x,y,z).
-- Podpora bezpečnostních limitů serv a interpolovaného pohybu (INTERP_STEPS).
-- Move se provádí voláním robot_cmd_move_xyz / robot_cmd_move_joints, které queue-ují příkazy do robot_control_task.
-
-### cmd_control (konzole / UART)
-- Modul používá esp_console (console_task) a registruje příkazy dostupné přes UART/terminál.
-- Hlavní příkazy:
-  - servo <id> <angle> — nastaví servo
-  - move <x> <y> <z> — enqueue MOVE XYZ
-  - sensors — vypíše úhly všech senzorů
-  - test — zařadí test sekvenci pohybu
-  - print <filename> — vytiskne obsah souboru z FILE_STORAGE_PATH (/spiffs/data)
-  - ls — list souborů v /spiffs/data
-  - stats — vytiskne shromážděné měřicí statistiky (rt_stats)
-  - tasks — vypíše seznam FreeRTOS úloh
-- Konzole běží jako task připnutý na CORE_ROBOT.
-
-### rt_stats (měření latencí)
-- rt_stats sleduje dobu vykonání příkazů (servo, sensors, move) pomocí esp_timer_get_time().
-- Uchovává count, min, max, mean a M2 pro výpočet směrodatné odchylky.
-- cmd_control jej poté používá pro periodické tisknutí statistik (např. každých N vzorků).
-
-### File manager a G-code
-- Soubory jsou uloženy pod /spiffs/data (FM_BASE).
-- Povolené přípony: .txt, .gcode
-- HTTP endpoints pro správu souborů:
-  - GET /files — seznam souborů (JSON)
-  - GET /file/<name> — stáhne soubor (pouze .txt/.gcode)
-  - PUT /file/<name> — uloží obsah do /spiffs/data/<name>
-  - DELETE /file/<name> — odstraní soubor
-  - POST /upload — ukládá nahraný G-code jako /spiffs/data/gcode_file.gcode (aktuální implementace)
-- upload a čtení jsou obsluhovány ve wifi_server.c (chunked read/write).
-
-## Připojení (SoftAP) + adresa webu
-
-ESP vytváří vlastní Wi-Fi (SoftAP):
-
-- **SSID:** `RoboControl`
-- **Heslo:** `Robo-Control123`
-- **IP adresa brány:** `192.168.8.1`
-
-Ovládání v prohlížeči:
-
-- **mDNS:** `http://robo-control.local/`
-- **Fallback (když .local nefunguje):** `http://192.168.8.1/`
-
-
-### Web server (HTTP/WS)
-- `/` – hlavní stránka (HTML)
-- `/ws` – WebSocket API pro real-time komunikaci
-  - Server periodicky broadcastuje JSON s poli "sensors" pro všechny klienty (interval ~200 ms, WS_SENSORS_PERIOD_MS).
-  - Přijímá JSON příkazy od klienta:
-    - {"servo": 0, "angle": 90}  — okamžité nastavení serva
-    - {"cmd":"sensors"}          — okamžité vyslání hodnot senzorů klientovi
-    - {"cmd":"move_xyz","x":10,"y":20,"z":30} — dá do fronty pohyb (vrací queued:true nebo error)
-  - Po připojení server posílá {"status":"connected"}.
-- `/status` — JSON stav (např. online true/false)
-- `/settings` — stránka nastavení Wi‑Fi
-- `/wifi_reset` — POST pro reset Wi‑Fi konfigurace (vymaže NVS a restartuje)
-
 <p align="center">
-  <img src="img/Web_interface.png" alt="Web server interface" width="700"/>
-</p>
-
----
-
-## Protokoly / formáty
-
-- WebSocket sensor broadcast: {"sensors":[{"id":0,"angle":12.3},...]}
-- WS příkaz servo: {"servo":<id>,"angle":<deg>}
-- WS příkaz move: {"cmd":"move_xyz","x":<float>,"y":<float>,"z":<float>}
-- HTTP /files returns: [{"name":"test.gcode","size":123},...]
-
----
-<p align="center">
-  <img src="img/PCB_realization.png" alt="PCB realization" width="700"/>
+  <img src="img/PCB_realization.png" alt="PCB realization" width="700" />
 </p>
