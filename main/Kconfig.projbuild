@@ -1,6 +1,6 @@
-menu "Example Configuration"
+menu "Project Configuration"
 
-    config EXAMPLE_ENABLE_HTTPS_USER_CALLBACK
+    config ROBO_ENABLE_HTTPS_USER_CALLBACK
         bool "Enable user callback with HTTPS Server"
         select ESP_TLS_SERVER_MIN_AUTH_MODE_OPTIONAL
         help

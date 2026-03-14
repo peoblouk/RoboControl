@@ -173,6 +173,7 @@ void robot_core_run_gcode(const char *filename);
 void robot_disarm(void);
 void robot_arm(void);
 bool robot_is_armed(void);
+bool robot_is_operating(void);
 
 bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SERVO_COUNT]);
 

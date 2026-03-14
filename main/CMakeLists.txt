@@ -1,12 +1,12 @@
 idf_component_register(
-                    SRCS "main.c" "robot_io/robot_io.c" "wifi_server/wifi_server.c" "cmd_control/cmd_control.c" "rt_stats/rt_stats.c" "gcode/gcode.c"
+                    SRCS "main.c" "robot_io/robot_io.c" "wifi_server/wifi_server.c" "cmd_control/cmd_control.c" "rt_stats/rt_stats.c" "gcode/gcode.c" "status_led/status_led.c"
 
-                    INCLUDE_DIRS "." "robot_io" "wifi_server" "cmd_control" "rt_stats" "gcode"
+                    INCLUDE_DIRS "." "robot_io" "wifi_server" "cmd_control" "rt_stats" "gcode" "status_led"
 
                     EMBED_TXTFILES "certs/servercert.pem"
                                     "certs/prvtkey.pem"
 
-                    REQUIRES esp_wifi esp_http_server esp_event esp_netif esp_driver_gpio esp_driver_ledc nvs_flash spiffs json driver console vfs esp_timer mdns esp_adc)
+                    REQUIRES esp_wifi esp_http_server esp_event esp_netif esp_driver_gpio esp_driver_ledc nvs_flash spiffs json driver console vfs esp_timer mdns esp_adc led_strip)
 
 target_compile_options(${COMPONENT_LIB} PRIVATE # Optimalization for reducing IRAM
     "-mlongcalls"

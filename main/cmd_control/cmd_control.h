@@ -15,6 +15,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "freertos/queue.h"
+#include "linenoise/linenoise.h"
 
 #include "robot_io.h"
 #include "rt_stats.h"

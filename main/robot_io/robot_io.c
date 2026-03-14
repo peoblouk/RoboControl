@@ -60,6 +60,7 @@ static int s_seg_w = 0, s_seg_r = 0;
 static traj_seg_t s_cur = {0};
 static float s_last_q[SERVO_COUNT] = {0};
 static volatile bool s_armed = true;
+static volatile bool s_operating = false;
 static volatile bool s_referenced = false;
 static volatile bool s_tcp_est_valid = false;
 static robot_pose_t s_tcp_est_base = {
@@ -89,6 +90,16 @@ static inline int servo_master(int servo_id) {
 static inline int servo_follower(int servo_id) {
     servo_id = servo_master(servo_id);
     return (servo_id == J1_A_SERVO) ? J1_B_SERVO : -1;
+}
+
+static inline float planar_radius_from_base(float x, float y)
+{
+    return sqrtf(x*x + y*y);
+}
+
+static inline float planar_radius_from_j1(float x, float y)
+{
+    return planar_radius_from_base(x, y) - J1_X_OFFSET;
 }
 
 static inline void work_to_base_xyz(float xw, float yw, float zw, float *xb, float *yb, float *zb)
@@ -526,12 +537,11 @@ bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
     (void)pitch_deg;
 
     // SIMPLE PLANAR IK FOR TUNING:
-    // For now we only test geometric IK in the arm plane (J0 + J1 + J2).
-    // Tool length / TCP pitch are intentionally ignored here so L0, L1, L2,
-    // DIR[] and OFF[] can be tuned first.
-    float r = sqrtf(x*x + y*y);
-    float z_sh = z - L0;
-    float d = sqrtf(r*r + z_sh*z_sh);
+    // Geometrie se řeší od osy J1, která je od J0 posunutá dopředu o J1_X_OFFSET.
+    // Tool length / TCP pitch jsou zatím ignorované.
+    const float r_j1 = planar_radius_from_j1(x, y);
+    const float z_sh = z - L0;
+    const float d = sqrtf(r_j1*r_j1 + z_sh*z_sh);
 
     if (d > (L1 + L2)) return false;
     if (d < fabsf(L1 - L2)) return false;
@@ -585,11 +595,12 @@ float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_
 static bool inverse_kinematics_simple(float x, float y, float z,
                                       float q_target[SERVO_COUNT])
 {
-    float r = sqrtf(x*x + y*y);
+    const float r_base = planar_radius_from_base(x, y);
+    const float r_j1   = planar_radius_from_j1(x, y);
 
-    // Base rotation
+    // Base rotation pořád z globálních x,y vůči J0
     float q0;
-    if (r < 1e-6f) {
+    if (r_base < 1e-6f) {
         float d0 = DIR[SERVO_J0];
         q0 = (fabsf(d0) < 1e-6f) ? 0.0f
                                  : DEG2RAD((s_last_q[SERVO_J0] - OFF[SERVO_J0]) / d0);
@@ -597,10 +608,10 @@ static bool inverse_kinematics_simple(float x, float y, float z,
         q0 = atan2f(y, x);
     }
 
-    // Simple planar IK for point J3
-    float z_sh = z - L0;
-    float d2   = r*r + z_sh*z_sh;
-    float d    = sqrtf(d2);
+    // Simple planar IK for point J3, geometrie od J1
+    const float z_sh = z - L0;
+    const float d2   = r_j1*r_j1 + z_sh*z_sh;
+    const float d    = sqrtf(d2);
 
     if (d > (L1 + L2)) return false;
     if (d < fabsf(L1 - L2)) return false;
@@ -609,7 +620,7 @@ static bool inverse_kinematics_simple(float x, float y, float z,
     if (cos_q2 >  1.0f) cos_q2 =  1.0f;
     if (cos_q2 < -1.0f) cos_q2 = -1.0f;
 
-    float phi = atan2f(z_sh, r);
+    float phi = atan2f(z_sh, r_j1);
 
     float q2 = -acosf(cos_q2);
     float psi = atan2f(L2 * sinf(q2), L1 + L2 * cosf(q2));
@@ -630,10 +641,10 @@ static bool inverse_kinematics_simple(float x, float y, float z,
     cand[SERVO_J4] = HOME_J4;
     cand[SERVO_J5] = HOME_J5;
 
-    // ESP_LOGW(TAG,
-    //          "IK dbg j0=%.1f j1=%.1f j2=%.1f | cand s0=%.1f s1=%.1f s2=%.1f s3=%.1f s4=%.1f s5=%.1f s6=%.1f",
-    //          j0, j1, j2,
-    //          cand[0], cand[1], cand[2], cand[3], cand[4], cand[5], cand[6]);
+    ESP_LOGW(TAG,
+             "IK dbg j0=%.1f j1=%.1f j2=%.1f | cand s0=%.1f s1=%.1f s2=%.1f s3=%.1f s4=%.1f s5=%.1f s6=%.1f",
+             j0, j1, j2,
+             cand[0], cand[1], cand[2], cand[3], cand[4], cand[5], cand[6]);
 
     float dbg[SERVO_COUNT];
     for (int i = 0; i < SERVO_COUNT; i++) dbg[i] = cand[i];
@@ -656,26 +667,32 @@ static bool inverse_kinematics_simple(float x, float y, float z,
 //                                    float tool_pitch_deg,
 //                                    float q_target[SERVO_COUNT])
 // {
-//     float r = sqrtf(x*x + y*y);
-
+//     const float r_base = planar_radius_from_base(x, y);
+//     const float r_j1   = r_base - J1_X_OFFSET;
+//
 //     // Base rotation
 //     float q0;
-//     if (r < 1e-6f) {
+//     if (r_base < 1e-6f) {
 //         float d0 = DIR[SERVO_J0];
 //         q0 = (fabsf(d0) < 1e-6f) ? 0.0f
 //                                  : DEG2RAD((s_last_q[SERVO_J0] - OFF[SERVO_J0]) / d0);
 //     } else {
 //         q0 = atan2f(y, x);
 //     }
-
+//
 //     if (!isfinite(tool_pitch_deg)) tool_pitch_deg = ROBOT_DEFAULT_PITCH_DEG;
 //     if (tool_pitch_deg >  89.0f) tool_pitch_deg =  89.0f;
 //     if (tool_pitch_deg < -89.0f) tool_pitch_deg = -89.0f;
-
+//
 //     const float phi = DEG2RAD(tool_pitch_deg);
-
+//
+//     // vyber si otevřený nebo zavřený gripper
+//     const float tool_len = L_TOOL_OPEN;   // nebo L_TOOL_CLOSED
+//
 //     // Wrist pitch pivot from TCP
-//     const float r_w  = r - (float)L_TOOL * cosf(phi);
+//     const float r_w  = r_j1 - tool_len * cosf(phi);
+//     const float z_w  = z    - tool_len * sinf(phi);
+//     const float z_sh = z_w - L0;
 //     const float z_w  = z - (float)L_TOOL * sinf(phi);
 //     const float z_sh = z_w - L0;
 
@@ -809,6 +826,7 @@ static void robot_control_task(void *arg)
             while (xQueueReceive(s_robot_queue, &cmd, 0) == pdTRUE) {
             }
 
+            s_operating = false;
             vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
             continue;
         }
@@ -819,11 +837,13 @@ static void robot_control_task(void *arg)
 
             if (cmd.type == ROBOT_CMD_QUEUE_FLUSH) {
                 seg_flush();
+                s_operating = false;
                 continue;
             }
 
             if (seg_full()) {
                 ESP_LOGW(TAG, "Planner full, dropping command");
+                s_operating = s_cur.active || !seg_empty();
                 continue;
             }
 
@@ -858,7 +878,11 @@ static void robot_control_task(void *arg)
                 bool ok = inverse_kinematics_simple(cmd.x, cmd.y, cmd.z, seg.q1);
                 // Future TCP version kept above as comments:
                 // bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
-                if (!ok) { ESP_LOGW(TAG, "IK SIMPLE failed"); continue; }
+                if (!ok) {
+                    ESP_LOGW(TAG, "IK SIMPLE failed");
+                    s_operating = s_cur.active || !seg_empty();
+                    continue;
+                }
 
                 ESP_LOGW(TAG, "IK servo: s0(J0)=%.1f s1(J1)=%.1f s3(J2)=%.1f s4(J3)=%.1f",
                          seg.q1[0], seg.q1[1], seg.q1[3], seg.q1[4]);
@@ -886,6 +910,7 @@ static void robot_control_task(void *arg)
             }
             else {
                 ESP_LOGW(TAG, "Unknown robot command: %d", cmd.type);
+                s_operating = s_cur.active || !seg_empty();
                 continue;
             }
 
@@ -900,7 +925,10 @@ static void robot_control_task(void *arg)
         }
 
         if (!s_cur.active) {
-            if (!seg_pop(&s_cur)) continue;
+            if (!seg_pop(&s_cur)) {
+                s_operating = false;
+                continue;
+            }
             s_cur.t = 0;
             s_cur.active = true;
         }
@@ -936,6 +964,8 @@ static void robot_control_task(void *arg)
 
             s_cur.active = false;
         }
+
+        s_operating = s_cur.active || !seg_empty();
     }
 }
 
@@ -944,9 +974,15 @@ bool robot_is_armed(void)
     return s_armed;
 }
 
+bool robot_is_operating(void)
+{
+    return s_operating;
+}
+
 void robot_disarm(void)
 {
     s_armed = false;
+    s_operating = false;
     robot_cmd_queue_flush();
 
     for (int i = 0; i < SERVO_COUNT; i++) {
@@ -1116,3 +1152,8 @@ void robot_core_run_gcode(const char *filename)
 }
 
 // mám papír a ten je 0,5 mm čtvrečkovaný jde o to že když se podívám na osu J0 (střed serva 0 ) tak je vzdálená od toho papíru cca 70 mm a pak je do výšky p7
+// Z   |  naměřeno
+// 40      51,9
+// 70      74,6
+// 90      94,5
+// 120     121,6

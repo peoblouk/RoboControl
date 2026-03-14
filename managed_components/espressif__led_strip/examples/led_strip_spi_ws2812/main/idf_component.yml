@@ -1,4 +1,4 @@
 dependencies:
-  espressif/mdns: ^1.9.1
   espressif/led_strip:
     version: ^3
+  idf: '>=5.1'

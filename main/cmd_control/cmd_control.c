@@ -8,14 +8,32 @@ static const char *TAG = "cmd_control";
 static rt_stats_t g_sensors_cmd_stats;
 static rt_stats_t g_servo_cmd_stats;
 static rt_stats_t g_move_cmd_stats;
+static esp_console_repl_t *s_repl = NULL;
+static vprintf_like_t s_prev_log_vprintf = NULL;
+static volatile bool s_repl_started = false;
+
+static int console_log_vprintf(const char *fmt, va_list ap)
+{
+    if (s_repl_started) {
+        if (!linenoiseIsDumbMode()) {
+            fputs("\r\033[2K", stdout);
+        } else {
+            fputs("\r", stdout);
+        }
+    }
+
+    if (s_prev_log_vprintf) return s_prev_log_vprintf(fmt, ap);
+    return vprintf(fmt, ap);
+}
 
 static void print_robot_state(void)
 {
     float wx, wy, wz;
     robot_get_work_offset(&wx, &wy, &wz);
 
-    printf("armed=%s referenced=%s tcp_est=%s\n",
+    printf("armed=%s operating=%s referenced=%s tcp_est=%s\n",
            robot_is_armed() ? "yes" : "no",
+           robot_is_operating() ? "yes" : "no",
            robot_is_referenced() ? "yes" : "no",
            robot_has_tcp_estimate() ? "yes" : "no");
     printf("work_offset: X=%.1f Y=%.1f Z=%.1f\n", wx, wy, wz);
@@ -33,6 +51,11 @@ static int cmd_joint(int argc, char **argv)
 {
     if (argc != 3) {
         printf("Usage: joint <id> <angle>\n");
+        return 0;
+    }
+
+    if (!robot_is_armed()) {
+        printf("ERR: joint rejected (robot is DISARMED)\n");
         return 0;
     }
 
@@ -79,7 +102,11 @@ static int cmd_move(int argc, char **argv)
 {
     if (argc != 4 && argc != 5) {
         printf("Usage: move <x> <y> <z> [pitch]\n");
-        printf("Note: pitch is ignored for now while simple planar IK is being tuned.\n");
+        return 0;
+    }
+
+    if (!robot_is_armed()) {
+        printf("ERR: move rejected (robot is DISARMED)\n");
         return 0;
     }
 
@@ -283,7 +310,7 @@ static int cmd_test(int argc, char **argv)
     ok &= robot_cmd_move_xyz_work(X0, Y0+DY, Z0,  P0); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0-DY, Z0,  P0); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0,    Z0,  P0); vTaskDelay(W);
-    // Pitch sweep intentionally disabled while tuning only planar geometric IK.
+    // Pitch sweep intentionally disabled while tuning only planar geometric IK
     // ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, +DP); vTaskDelay(W);
     // ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, -DP); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0, Z0,  P0); vTaskDelay(W);
@@ -386,66 +413,34 @@ static void register_commands(void)
     }
 }
 
-static void console_task(void *arg)
-{
-    (void)arg;
-    setvbuf(stdin,  NULL, _IONBF, 0);
-    setvbuf(stdout, NULL, _IONBF, 0);
-
-    esp_console_config_t console_cfg = {
-        .max_cmdline_args   = 16,
-        .max_cmdline_length = CMD_BUF_SIZE,
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-        .hint_color = 0,
-        .hint_bold  = false,
-#endif
-    };
-    ESP_ERROR_CHECK(esp_console_init(&console_cfg));
-    register_commands();
-
-    ESP_LOGI(TAG, "console_task running on core %d", xPortGetCoreID());
-
-    char buf[CMD_BUF_SIZE];
-    int pos = 0;
-    printf("> ");
-
-    while (1) {
-        int c = getchar();
-        if (c == EOF) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-        if (c == '\r' || c == '\n') {
-            putchar('\n');
-            buf[pos] = '\0';
-            if (pos > 0) {
-                int ret = 0;
-                esp_err_t err = esp_console_run(buf, &ret);
-                if (err == ESP_ERR_NOT_FOUND) printf("ERR: Unknown command '%s'\n", buf);
-                else if (err == ESP_ERR_INVALID_ARG) printf("ERR: Parse error\n");
-            }
-            pos = 0;
-            printf("> ");
-            continue;
-        }
-        if (c == 0x08 || c == 0x7F) {
-            if (pos > 0) { pos--; printf("\b \b"); }
-            continue;
-        }
-        if (c >= 32 && c < 127) {
-            if (pos < CMD_BUF_SIZE - 1) { buf[pos++] = (char)c; putchar(c); }
-            continue;
-        }
-    }
-}
-
 void cmd_control_start(void)
 {
-    BaseType_t res = xTaskCreatePinnedToCore(console_task, "console_task", 4096, NULL, 5, NULL, CORE_ROBOT);
-    if (res != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create console_task");
-    } else {
-        ESP_LOGI(TAG, "console_task started on core %d", CORE_ROBOT);
-        rt_stats_reset(&g_sensors_cmd_stats);
+    esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    repl_cfg.prompt = ">";
+    repl_cfg.max_history_len = 5;
+    repl_cfg.max_cmdline_length = CMD_BUF_SIZE;
+    repl_cfg.task_stack_size = 4096;
+    repl_cfg.task_priority = 5;
+    repl_cfg.task_core_id = CORE_ROBOT;
+
+    esp_err_t err = esp_console_new_repl_uart(&uart_cfg, &repl_cfg, &s_repl);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create console REPL: %s", esp_err_to_name(err));
+        return;
     }
+
+    register_commands();
+
+    s_prev_log_vprintf = esp_log_set_vprintf(console_log_vprintf);
+
+    err = esp_console_start_repl(s_repl);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start console REPL: %s", esp_err_to_name(err));
+        return;
+    }
+
+    s_repl_started = true;
+    ESP_LOGI(TAG, "console REPL started on core %d", CORE_ROBOT);
+    rt_stats_reset(&g_sensors_cmd_stats);
 }

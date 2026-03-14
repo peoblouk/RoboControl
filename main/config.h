@@ -95,6 +95,10 @@
 #define SERVO2_OFF_DEG  175.0f
 #define SERVO3_OFF_DEG  149.0f
 
+// #define SERVO1_OFF_DEG  173.0f
+// #define SERVO2_OFF_DEG  173.0f
+// #define SERVO3_OFF_DEG  151.0f
+
 // Future wrist/tool calibration
 #define SERVO4_OFF_DEG  70.0f
 #define SERVO5_OFF_DEG  98.0f
@@ -119,7 +123,8 @@
 }
 
 // #define SERVO_OFF_INIT { 75.0f, 175.0f, 175.0f, 149.0f, 90.0f, 90.0f, 90.0f }
-// #define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f } // correct for "L" pose with current calibration | move 74.5 0 182.5 |
+// #define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f }
+//correct for "L" pose with current calibration | move 92.5 0 183.0 |
 
 // ===============================
 // ROBOT: J1 FOLLOWER
@@ -148,10 +153,23 @@
 // ===============================
 // ROBOT: ARM GEOMETRY (mm)
 // ===============================
-#define L0  75.0f
-#define L1  107.5f
-#define L2  74.5f
-#define L_TOOL 124.5f
+#define L0 81.9f //75.5f // height of J0 above the base
+
+// offset from J0 to the vertical plane of J1
+#define J1_X_OFFSET  18.0f
+
+#define L1  107.5f   // J1 -> J2
+#define L2   74.5f   // J2 -> J3
+#define L3   58.8f   // J3 -> J4
+#define L4_OPEN   70.0f   // J4 -> gripper closed (90 degree)
+#define L4_CLOSED 54.6f   // J4 -> gripper open (0 degree)
+
+// pro budoucí TCP fázi
+#define L_TOOL_OPEN   (L3 + L4_OPEN)    // 128.8 mm
+#define L_TOOL_CLOSED (L3 + L4_CLOSED)  // 113.4 mm
+
+// kompatibilita se starým kódem pro budoucí TCP
+#define L_TOOL L_TOOL_OPEN
 
 // ===============================
 // ROBOT: JOINT LIMITS (deg / deg/s)
@@ -242,12 +260,34 @@
 #define HTTP_FILE_PREFIX   "/file/"
 
 // ===============================
+// STATUS RGB LED (WS2812)
+// ===============================
+#define STATUS_LED_WS2812_GPIO       GPIO_NUM_38 // ESP32-S3-DevKitC-1 onboard RGB LED
+#define STATUS_LED_COUNT             1
+#define STATUS_LED_RMT_RES_HZ        (10 * 1000 * 1000)
+#define STATUS_LED_USE_DMA           0
+#define STATUS_LED_TASK_PERIOD_MS    50
+#define STATUS_LED_OPER_BLINK_MS     300
+
+#define STATUS_LED_DISARM_R          24
+#define STATUS_LED_DISARM_G          0
+#define STATUS_LED_DISARM_B          0
+
+#define STATUS_LED_ARM_R             0
+#define STATUS_LED_ARM_G             24
+#define STATUS_LED_ARM_B             0
+
+#define STATUS_LED_OPER_R            24
+#define STATUS_LED_OPER_G            14
+#define STATUS_LED_OPER_B            0
+
+// ===============================
 // Robot Positions
 // ===============================
 #define HOME_J0 75
 #define HOME_J1 80
 #define HOME_J2 30
-#define HOME_J3 0// 120 //  
+#define HOME_J3 0 //120 //  
 #define HOME_J4 90
 #define HOME_J5 90
 #define HOME_J6 90
@@ -292,7 +332,7 @@
     80.0f, \
     (80.0f + J1_B_TRIM_DEG), \
     30.0f, \
-    120.0f, \
+    70.0f, \
     90.0f, \
     90.0f \
 }

@@ -172,6 +172,7 @@ static void ws_broadcast(const char *msg) {
 
 static inline const char *robot_state_str_(void) {
     if (!robot_is_armed()) return "DISARMED";
+    if (robot_is_operating()) return "OPERATING";
     if (!robot_is_referenced()) return "UNREFERENCED";
     if (!robot_has_tcp_estimate()) return "POSE_UNKNOWN";
     return "IDLE";
@@ -209,28 +210,34 @@ static esp_err_t ws_handler(httpd_req_t *req) {
         cJSON *angle = cJSON_GetObjectItem(json, "angle");
 
         if (cJSON_IsNumber(joint) && cJSON_IsNumber(angle)) {
+            int fd = httpd_req_to_sockfd(req);
             int jid = joint->valueint;
             float a = (float)angle->valuedouble;
 
-            if (jid >= 0 && jid < 6) {
+            if (!robot_is_armed()) {
+                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"disarmed\"}");
+            } else if (jid >= 0 && jid < 6) {
                 joint_set_angle(jid, a);
-                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"ok\",\"cmd\":\"joint\"}");
+                ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"joint\"}");
             } else {
-                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"bad_id\"}");
+                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"bad_id\"}");
             }
         }
 
         cJSON *servo = cJSON_GetObjectItem(json, "servo");
         if (cJSON_IsNumber(servo) && cJSON_IsNumber(angle)) {
+            int fd = httpd_req_to_sockfd(req);
             int id = servo->valueint;
             float a = (float)angle->valuedouble;
             static const int servo_to_joint[7] = { 0, 1, 1, 2, 3, 4, 5 };
 
-            if (id >= 0 && id < 7) {
+            if (!robot_is_armed()) {
+                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"disarmed\"}");
+            } else if (id >= 0 && id < 7) {
                 joint_set_angle(servo_to_joint[id], a);
-                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"ok\",\"cmd\":\"joint\"}");
+                ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"joint\"}");
             } else {
-                ws_send_to(httpd_req_to_sockfd(req), "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"bad_id\"}");
+                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"bad_id\"}");
             }
         }
 
@@ -291,14 +298,16 @@ static esp_err_t ws_handler(httpd_req_t *req) {
                 float z = (float)jz->valuedouble;
                 if (cJSON_IsNumber(jp)) pitch = (float)jp->valuedouble;
 
-
-                bool ok = robot_cmd_move_xyz_work(x, y, z, pitch);
                 int fd  = httpd_req_to_sockfd(req);
-
-                if (ok) {
-                    ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"move_xyz\",\"queued\":true}");
+                if (!robot_is_armed()) {
+                    ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"move_xyz\",\"reason\":\"disarmed\"}");
                 } else {
-                    ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"move_xyz\",\"reason\":\"queue_full_or_not_started\"}");
+                    bool ok = robot_cmd_move_xyz_work(x, y, z, pitch);
+                    if (ok) {
+                        ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"move_xyz\",\"queued\":true}");
+                    } else {
+                        ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"move_xyz\",\"reason\":\"queue_full_or_not_started\"}");
+                    }
                 }
             }
         }
