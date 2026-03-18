@@ -31,10 +31,11 @@
 
         elText.textContent = state || "Unknown";
 
-        if (state === "IDLE") elDot.style.background = "#fbbf24";
-        else if (state === "RUNNING") elDot.style.background = "#22c55e";
-        else if (state === "ALARM" || state === "ERROR") elDot.style.background = "#ef4444";
-        else if (state === "STOPPED") elDot.style.background = "#ef4444";
+        if (state === "OPERATING" || state === "RUNNING") elDot.style.background = "#22c55e";
+        else if (state === "IDLE") elDot.style.background = "#fbbf24";
+        else if (state === "UNREFERENCED" || state === "POSE_UNKNOWN") elDot.style.background = "#f59e0b";
+        else if (state === "DISARMED") elDot.style.background = "#ef4444";
+        else if (state === "ALARM" || state === "ERROR" || state === "STOPPED") elDot.style.background = "#ef4444";
         else elDot.style.background = "#888";
       }
 

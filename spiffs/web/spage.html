@@ -88,10 +88,11 @@
 
         elText.textContent = state || "Unknown";
 
-        if (state === "IDLE") elDot.style.background = "#fbbf24";
-        else if (state === "RUNNING") elDot.style.background = "#22c55e";
+        if (state === "OPERATING" || state === "RUNNING") elDot.style.background = "#22c55e";
+        else if (state === "IDLE") elDot.style.background = "#fbbf24";
+        else if (state === "UNREFERENCED" || state === "POSE_UNKNOWN") elDot.style.background = "#f59e0b";
         else if (state === "DISARMED") elDot.style.background = "#ef4444";
-        else if (state === "ALARM" || state === "ERROR") elDot.style.background = "#ef4444";
+        else if (state === "ALARM" || state === "ERROR" || state === "STOPPED") elDot.style.background = "#ef4444";
         else elDot.style.background = "#888";
       }
 
@@ -300,28 +301,17 @@
           return;
         }
 
-        const homeAngles = [90, 75, 80, 120, 60, 60];
-
         clearAllDirty();
-        for (let i = 0; i < 6; i++) lockJoint(i, 1200);
+        for (let i = 0; i < 6; i++) lockJoint(i, 1500);
 
-        for (let jid = 0; jid < homeAngles.length; jid++) {
-          const v = homeAngles[jid];
-
-          ws.send(JSON.stringify({ joint: jid, angle: v }));
-
-          const input = document.getElementById(`joint-${jid}`);
-          const targetEl = document.getElementById(`joint-value-${jid}`);
-          if (input) input.value = v;
-          if (targetEl) targetEl.textContent = `${v}°`;
-          jointDirty[jid] = true;
-          jointTarget[jid] = v;
-        }
-
+        ws.send(JSON.stringify({ cmd: "home" }));
         ws.send(JSON.stringify({ cmd: "sensors" }));
         setTimeout(() => {
           if (ws && ws.readyState === 1) ws.send(JSON.stringify({ cmd: "sensors" }));
-        }, 300);
+        }, 350);
+        setTimeout(() => {
+          if (ws && ws.readyState === 1) ws.send(JSON.stringify({ cmd: "sensors" }));
+        }, 1400);
       }
 
       function getPitchDeg() {
@@ -402,7 +392,6 @@
         if (!ws || ws.readyState !== 1) return;
         ws.send(JSON.stringify({ cmd: "arm" }));
         ws.send(JSON.stringify({ cmd: "sensors" }));
-        setRobotUI("IDLE");
       }
 
       async function uploadFile() {

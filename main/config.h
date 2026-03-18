@@ -11,6 +11,18 @@
 #define CORE_COMM   0   // WiFi, CAN, webserver
 #define CORE_ROBOT  1   // servos, sensors, control
 
+// ===============================
+// CAN / TWAI CONFIGURATION
+// ===============================
+#define CAN_TX_GPIO             GPIO_NUM_14
+#define CAN_RX_GPIO             GPIO_NUM_13
+#define CAN_BITRATE             500000
+#define CAN_NODE_ID             0x01
+#define CAN_STATUS_PERIOD_MS    500
+#define CAN_TX_QUEUE_LEN        16
+#define CAN_RX_QUEUE_LEN        16
+#define CAN_NO_ACK_MODE         1
+
 // Filepaths
 #define FS_DATA_BASE        "/spiffs/data"
 #define FS_WEB_BASE         "/spiffs/web"
@@ -26,9 +38,9 @@
 // ===============================
 // ROBOT: SERVO / JOINT IDs
 // ===============================
-// Servo IDs (indexy do servos[] / s_servo_pwm[] / OFF[] / DIR[])
+// Servo IDs
 #define SERVO_J0      0
-#define SERVO_J1_A    1
+#define SERVO_J1_A    1   // master
 #define SERVO_J1_B    2   // follower
 #define SERVO_J2      3
 #define SERVO_J3      4
@@ -37,11 +49,7 @@
 
 #define ROBOT_DEFAULT_PITCH_DEG 20.0f
 
-// Kompatibilita se starými názvy
-#define J1_A_SERVO    SERVO_J1_A
-#define J1_B_SERVO    SERVO_J1_B
-
-// Joint -> master servo mapping (indexy jointů jsou 0..JOINT_COUNT-1)
+// Joint -> master servo mapping
 #define JOINT0_SERVO  SERVO_J0
 #define JOINT1_SERVO  SERVO_J1_A
 #define JOINT2_SERVO  SERVO_J2
@@ -94,15 +102,13 @@
 #define SERVO1_OFF_DEG  175.0f
 #define SERVO2_OFF_DEG  175.0f
 #define SERVO3_OFF_DEG  149.0f
+#define SERVO4_OFF_DEG  70.0f
+#define SERVO5_OFF_DEG  98.0f
+#define SERVO6_OFF_DEG  0.0f
 
 // #define SERVO1_OFF_DEG  173.0f
 // #define SERVO2_OFF_DEG  173.0f
 // #define SERVO3_OFF_DEG  151.0f
-
-// Future wrist/tool calibration
-#define SERVO4_OFF_DEG  70.0f
-#define SERVO5_OFF_DEG  98.0f
-#define SERVO6_OFF_DEG  0.0f
 
 #define SERVO0_DIR      +1.0f
 #define SERVO1_DIR      -1.0f
@@ -153,18 +159,15 @@
 // ===============================
 // ROBOT: ARM GEOMETRY (mm)
 // ===============================
-#define L0 81.9f //75.5f // height of J0 above the base
+#define L0 81.9f            //75.5f // height of J0 above the base
+#define J1_X_OFFSET  18.0f  // offset from J0 to the vertical plane of J1
+#define L1  107.5f          // J1 -> J2
+#define L2   74.5f          // J2 -> J3
+#define L3   58.8f          // J3 -> J4
+#define L4_OPEN   70.0f     // J4 -> gripper closed (90 degree)
+#define L4_CLOSED 54.6f     // J4 -> gripper open (0 degree)
 
-// offset from J0 to the vertical plane of J1
-#define J1_X_OFFSET  18.0f
-
-#define L1  107.5f   // J1 -> J2
-#define L2   74.5f   // J2 -> J3
-#define L3   58.8f   // J3 -> J4
-#define L4_OPEN   70.0f   // J4 -> gripper closed (90 degree)
-#define L4_CLOSED 54.6f   // J4 -> gripper open (0 degree)
-
-// pro budoucí TCP fázi
+// Tool length
 #define L_TOOL_OPEN   (L3 + L4_OPEN)    // 128.8 mm
 #define L_TOOL_CLOSED (L3 + L4_CLOSED)  // 113.4 mm
 
@@ -287,7 +290,7 @@
 #define HOME_J0 75
 #define HOME_J1 80
 #define HOME_J2 30
-#define HOME_J3 0 //120 //  
+#define HOME_J3 0 //120 
 #define HOME_J4 90
 #define HOME_J5 90
 #define HOME_J6 90
@@ -306,7 +309,7 @@
 #define ROBOT_HOME_Z_BASE_DEFAULT   0.0f
 #define ROBOT_HOME_PITCH_DEG_DEFAULT 0.0f
 
-// // bez tool
+// // withouth tool
 // #define ROBOT_WORK_OFFSET_X_DEFAULT 140.0f
 // #define ROBOT_WORK_OFFSET_Y_DEFAULT   0.0f
 // #define ROBOT_WORK_OFFSET_Z_DEFAULT  25.0f
@@ -315,7 +318,7 @@
 // #define ROBOT_HOME_Y_BASE_DEFAULT     0.0f
 // #define ROBOT_HOME_Z_BASE_DEFAULT    80.0f
 
-// // s tool
+// // with tool
 // #define ROBOT_WORK_OFFSET_X_DEFAULT 220.0f
 // #define ROBOT_WORK_OFFSET_Y_DEFAULT 0.0f
 // #define ROBOT_WORK_OFFSET_Z_DEFAULT 25.0f

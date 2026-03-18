@@ -105,6 +105,14 @@ typedef struct {
 } traj_seg_t;
 
 // ===============================
+// GCODE TASK PARAMS
+// ===============================
+typedef struct {
+    char filename[64];
+} gcode_task_params_t;
+
+
+// ===============================
 // FUNCTION PROTOTYPES
 // ===============================
 void servos_init(void);

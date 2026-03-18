@@ -16,7 +16,29 @@
     { "type": "wokwi-potentiometer", "id": "pot4", "top": 161.9, "left": -163.4, "attrs": {} },
     { "type": "wokwi-potentiometer", "id": "pot5", "top": 248.3, "left": -163.4, "attrs": {} },
     { "type": "wokwi-potentiometer", "id": "pot6", "top": 334.7, "left": -163.4, "attrs": {} },
-    { "type": "wokwi-serial-terminal", "id": "uart1term", "top": -100, "left": 200 }
+    { "type": "wokwi-serial-terminal", "id": "uart1term", "top": -100, "left": 200 },
+    {
+      "type": "wokwi-logic-analyzer",
+      "id": "la1",
+      "top": 59.2,
+      "left": 608,
+      "attrs": {
+        "bufferSize": "200000",
+        "channelNames": "CAN_TX,CAN_RX,UART_TX,UART_RX,D4,D5,D6,D7",
+        "filename": "twai-can"
+      }
+    },
+    { "type": "wokwi-gate-and-2", "id": "canbus1", "top": 187.2, "left": 602.4, "attrs": {} },
+    { "type": "wokwi-vcc", "id": "canvcc1", "top": 154.4, "left": 560, "attrs": {} },
+    {
+      "type": "wokwi-text",
+      "id": "cantext1",
+      "top": 245.6,
+      "left": 544,
+      "attrs": {
+        "text": "Virtual CAN/TJA1050 placeholder\\nTXD(GPIO14) -> bus -> RXD(GPIO13)\\nReady for LA capture and later bus extension"
+      }
+    }
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
@@ -50,7 +72,17 @@
     [ "pot3:SIG", "esp:6", "blue", [] ],
     [ "pot4:SIG", "esp:7", "blue", [] ],
     [ "pot5:SIG", "esp:12", "blue", [] ],
-    [ "pot6:SIG", "esp:17", "blue", [] ]
+    [ "pot6:SIG", "esp:17", "blue", [] ],
+
+    [ "esp:14", "canbus1:A", "magenta", [] ],
+    [ "canvcc1:VCC", "canbus1:B", "red", [] ],
+    [ "canbus1:OUT", "esp:13", "magenta", [] ],
+
+    [ "esp:GND.1", "la1:GND", "black", [] ],
+    [ "esp:14", "la1:D0", "magenta", [] ],
+    [ "esp:13", "la1:D1", "cyan", [] ],
+    [ "esp:10", "la1:D2", "green", [] ],
+    [ "esp:9", "la1:D3", "yellow", [] ]
   ],
   "dependencies": {}
 }

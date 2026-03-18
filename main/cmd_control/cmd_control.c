@@ -9,22 +9,6 @@ static rt_stats_t g_sensors_cmd_stats;
 static rt_stats_t g_servo_cmd_stats;
 static rt_stats_t g_move_cmd_stats;
 static esp_console_repl_t *s_repl = NULL;
-static vprintf_like_t s_prev_log_vprintf = NULL;
-static volatile bool s_repl_started = false;
-
-static int console_log_vprintf(const char *fmt, va_list ap)
-{
-    if (s_repl_started) {
-        if (!linenoiseIsDumbMode()) {
-            fputs("\r\033[2K", stdout);
-        } else {
-            fputs("\r", stdout);
-        }
-    }
-
-    if (s_prev_log_vprintf) return s_prev_log_vprintf(fmt, ap);
-    return vprintf(fmt, ap);
-}
 
 static void print_robot_state(void)
 {
@@ -45,6 +29,121 @@ static void print_robot_state(void)
     } else {
         printf("tcp_work_est: unknown\n");
     }
+}
+
+static const char *twai_state_to_str_(twai_state_t state)
+{
+    switch (state) {
+        case TWAI_STATE_STOPPED: return "stopped";
+        case TWAI_STATE_RUNNING: return "running";
+        case TWAI_STATE_BUS_OFF: return "bus-off";
+        case TWAI_STATE_RECOVERING: return "recovering";
+        default: return "unknown";
+    }
+}
+
+static void print_can_flags_(uint8_t flags)
+{
+    printf("flags: armed=%s operating=%s referenced=%s tcp_est=%s\n",
+           (flags & (1U << 0)) ? "yes" : "no",
+           (flags & (1U << 1)) ? "yes" : "no",
+           (flags & (1U << 2)) ? "yes" : "no",
+           (flags & (1U << 3)) ? "yes" : "no");
+}
+
+static int cmd_can(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage:\n");
+        printf("  can up\n");
+        printf("  can status\n");
+        printf("  can hb\n");
+        printf("  can tx <id> [b0 ... b7]\n");
+        printf("  can recover\n");
+        return 0;
+    }
+
+    if (strcmp(argv[1], "up") == 0) {
+        if (can_is_started()) {
+            printf("OK: CAN already started\n");
+            return 0;
+        }
+        can_start();
+        printf(can_is_started() ? "OK: CAN started\n" : "ERR: CAN start failed\n");
+        return 0;
+    }
+
+    if (strcmp(argv[1], "status") == 0) {
+        can_runtime_stats_t st = {0};
+        esp_err_t err = can_get_runtime_stats(&st);
+        if (err != ESP_OK) {
+            printf("ERR: cannot read CAN status (%s)\n", esp_err_to_name(err));
+            return 0;
+        }
+
+        printf("started=%s state=%s tx_frames=%" PRIu32 " rx_frames=%" PRIu32 " tx_fail=%" PRIu32 " hb=%" PRIu32 "\n",
+               st.started ? "yes" : "no",
+               twai_state_to_str_(st.driver_status.state),
+               st.tx_frames,
+               st.rx_frames,
+               st.tx_failures,
+               st.heartbeat_frames);
+        printf("driver: queued_tx=%" PRIu32 " queued_rx=%" PRIu32 " tx_err=%" PRIu32 " rx_err=%" PRIu32 " bus_err=%" PRIu32 "\n",
+               st.driver_status.msgs_to_tx,
+               st.driver_status.msgs_to_rx,
+               st.driver_status.tx_error_counter,
+               st.driver_status.rx_error_counter,
+               st.driver_status.bus_error_count);
+        printf("alerts=%" PRIu32 " last_alerts=0x%08" PRIX32 " rx_timeouts=%" PRIu32 "\n",
+               st.alert_events,
+               st.last_alerts,
+               st.rx_timeouts);
+        print_can_flags_(st.last_state_flags);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "hb") == 0) {
+        esp_err_t err = can_send_heartbeat_now();
+        if (err == ESP_OK) printf("OK: heartbeat sent\n");
+        else printf("ERR: heartbeat failed (%s)\n", esp_err_to_name(err));
+        return 0;
+    }
+
+    if (strcmp(argv[1], "recover") == 0) {
+        esp_err_t err = can_request_recovery();
+        if (err == ESP_OK) printf("OK: recovery requested\n");
+        else printf("ERR: recovery failed (%s)\n", esp_err_to_name(err));
+        return 0;
+    }
+
+    if (strcmp(argv[1], "tx") == 0) {
+        if (argc < 3 || argc > 11) {
+            printf("Usage: can tx <id> [b0 ... b7]\n");
+            return 0;
+        }
+
+        uint32_t id = strtoul(argv[2], NULL, 0);
+        uint8_t data[8] = {0};
+        uint8_t len = (uint8_t)(argc - 3);
+
+        for (int i = 0; i < len; i++) {
+            char *end = NULL;
+            unsigned long v = strtoul(argv[3 + i], &end, 0);
+            if (end == argv[3 + i] || *end != '\0' || v > 0xFFUL) {
+                printf("ERR: invalid byte '%s'\n", argv[3 + i]);
+                return 0;
+            }
+            data[i] = (uint8_t)v;
+        }
+
+        esp_err_t err = can_send_raw(id, data, len);
+        if (err == ESP_OK) printf("OK: frame queued\n");
+        else printf("ERR: tx failed (%s)\n", esp_err_to_name(err));
+        return 0;
+    }
+
+    printf("Unknown can subcommand\n");
+    return 0;
 }
 
 static int cmd_joint(int argc, char **argv)
@@ -398,6 +497,7 @@ static void register_commands(void)
         { .command = "stats",  .help = "Print timing stats for control commands", .func = &cmd_stats },
         { .command = "tasks",  .help = "Print FreeRTOS task list", .func = &cmd_tasks },
         { .command = "gcode",  .help = "G-code: gcode run <file>, gcode line <...>, gcode stop, gcode reset, gcode sync", .func = &cmd_gcode },
+        { .command = "can",    .help = "CAN/TWAI: can up | can status | can hb | can tx <id> [b0..b7] | can recover", .func = &cmd_can },
         { .command = "disarm", .help = "Disable servo PWM outputs", .func = &cmd_disarm },
         { .command = "arm",    .help = "Enable servo PWM outputs", .func = &cmd_arm },
         { .command = "home",   .help = "Move robot to HOME position and establish reference", .func = &cmd_home },
@@ -432,7 +532,10 @@ void cmd_control_start(void)
 
     register_commands();
 
-    s_prev_log_vprintf = esp_log_set_vprintf(console_log_vprintf);
+    // Force full line editor mode for idf.py monitor (history/arrows/TAB).
+    linenoiseSetDumbMode(0);
+    // Single-line mode keeps redraw behavior less aggressive while typing.
+    linenoiseSetMultiLine(0);
 
     err = esp_console_start_repl(s_repl);
     if (err != ESP_OK) {
@@ -440,7 +543,6 @@ void cmd_control_start(void)
         return;
     }
 
-    s_repl_started = true;
     ESP_LOGI(TAG, "console REPL started on core %d", CORE_ROBOT);
     rt_stats_reset(&g_sensors_cmd_stats);
 }

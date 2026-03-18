@@ -20,6 +20,7 @@
 #include "robot_io.h"
 #include "rt_stats.h"
 #include "gcode.h"
+#include "can_communication.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"

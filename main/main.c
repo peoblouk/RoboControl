@@ -6,14 +6,15 @@
 #include "nvs_flash.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
-#include "wifi_server.h"    // Wi-Fi and Servo Control Server
-#include "robot_io.h"       // Robotic Arm Kinematics
-#include "config.h"         // Configuration
-#include "cmd_control.h"    // Command Control
-#include "rt_stats.h"       // Real-time statistics
-#include "status_led.h"     // Status RGB LED
+#include "wifi_server.h"        // Wi-Fi and Servo Control Server
+#include "robot_io.h"           // Robotic Arm Kinematics
+#include "config.h"             // Configuration
+#include "cmd_control.h"        // Command Control
+#include "rt_stats.h"           // Real-time statistics
+#include "status_led.h"         // Status RGB LED
+#include "can_communication.h"  // CAN communication
 
-static void init_spiffs(void); // Initialize SPIFFS (File System)
+static void init_spiffs(void);  // Initialize SPIFFS (File System)
 
 void app_main(void)
 {
@@ -30,6 +31,7 @@ void app_main(void)
 
     wifi_server_start();       // Start HTTP Server
     robot_control_start();     // Start robot control task
+    //can_start();               // Start CAN/TWAI task   
     status_led_start();        // Start status LED task
     cmd_control_start();       // Start command control task
 }

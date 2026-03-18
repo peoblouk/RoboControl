@@ -2,6 +2,7 @@
 version = 1
 firmware = 'build/flasher_args.json'
 elf = 'build/robocontrol.elf'
+vcdFile = 'twai-can.vcd'
 
 #firmware = 'build/robocontrol.bin'
 board = 'ESP32-S3'

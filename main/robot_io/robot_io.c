@@ -19,8 +19,6 @@ static const int s_joint_master_servo[JOINT_COUNT] = {
     JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
 };
 
-//static const int s_joint_sensor_idx[JOINT_COUNT] = { 0, 1, 2, 3, 4, 5 };
-
 servo_t servos[SERVO_COUNT] = {
     { .gpio_num = SERVO0_GPIO, .channel = SERVO0_CH }, // J0
     { .gpio_num = SERVO1_GPIO, .channel = SERVO1_CH }, // J1_A
@@ -50,16 +48,17 @@ const joint_limits_t g_joint_limits[SERVO_COUNT] = {
     { .min_deg = J5_MIN, .max_deg = J5_MAX, .max_deg_s = J5_V }, // servo 6 (gripper)
 };
 
-typedef struct {
-    char filename[64];
-} gcode_task_params_t;
+static float OFF[SERVO_COUNT] = SERVO_OFF_INIT;
+static float DIR[SERVO_COUNT] = SERVO_DIR_INIT;
+static servo_pwm_range_t s_servo_pwm[SERVO_COUNT] = SERVO_PWM_RANGES_INIT;
+static portMUX_TYPE s_pwm_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static QueueHandle_t s_robot_queue = NULL;
 static traj_seg_t s_seg_buf[SEG_BUF_LEN];
 static int s_seg_w = 0, s_seg_r = 0;
 static traj_seg_t s_cur = {0};
 static float s_last_q[SERVO_COUNT] = {0};
-static volatile bool s_armed = true;
+static volatile bool s_armed = false;
 static volatile bool s_operating = false;
 static volatile bool s_referenced = false;
 static volatile bool s_tcp_est_valid = false;
@@ -84,12 +83,12 @@ static inline float clampf(float v, float lo, float hi) {
 }
 
 static inline int servo_master(int servo_id) {
-    return (servo_id == J1_B_SERVO) ? J1_A_SERVO : servo_id;
+    return (servo_id == SERVO_J1_B) ? SERVO_J1_A : servo_id;
 }
 
 static inline int servo_follower(int servo_id) {
     servo_id = servo_master(servo_id);
-    return (servo_id == J1_A_SERVO) ? J1_B_SERVO : -1;
+    return (servo_id == SERVO_J1_A) ? SERVO_J1_B : -1;
 }
 
 static inline float planar_radius_from_base(float x, float y)
@@ -185,9 +184,6 @@ bool robot_get_tcp_estimate_work(robot_pose_t *pose)
 // ===============================
 // SERVO PWM RANGES
 // ===============================
-static servo_pwm_range_t s_servo_pwm[SERVO_COUNT] = SERVO_PWM_RANGES_INIT;
-static portMUX_TYPE s_pwm_mux = portMUX_INITIALIZER_UNLOCKED;
-
 bool servo_pwm_set_range_us(int servo_id, int min_us, int max_us)
 {
     if (servo_id < 0 || servo_id >= SERVO_COUNT) return false;
@@ -246,9 +242,6 @@ static inline uint32_t angle_to_duty(int servo_id, float angle_deg)
 // ===============================
 // SERVO/KINEMATICS MAPPING
 // ===============================
-static float OFF[SERVO_COUNT] = SERVO_OFF_INIT;
-static float DIR[SERVO_COUNT] = SERVO_DIR_INIT;
-
 static inline float map_servo(int sid, float joint_deg_math)
 {
     return OFF[sid] + DIR[sid] * joint_deg_math;
@@ -261,11 +254,11 @@ static inline float j1_b_from_j1_a(float a_deg)
 
 static inline void j1_a_allowed_range(float *lo, float *hi)
 {
-    float a_lo = g_joint_limits[J1_A_SERVO].min_deg;
-    float a_hi = g_joint_limits[J1_A_SERVO].max_deg;
+    float a_lo = g_joint_limits[SERVO_J1_A].min_deg;
+    float a_hi = g_joint_limits[SERVO_J1_A].max_deg;
 
-    const float b_lo = g_joint_limits[J1_B_SERVO].min_deg;
-    const float b_hi = g_joint_limits[J1_B_SERVO].max_deg;
+    const float b_lo = g_joint_limits[SERVO_J1_B].min_deg;
+    const float b_hi = g_joint_limits[SERVO_J1_B].max_deg;
 
     const float a_from_b_lo = b_lo - J1_B_TRIM_DEG;
     const float a_from_b_hi = b_hi - J1_B_TRIM_DEG;
@@ -287,10 +280,10 @@ static void joint_limits_get(int joint_id, float *lo, float *hi, float *vmax)
     float h = g_joint_limits[s].max_deg;
     float v = g_joint_limits[s].max_deg_s;
 
-    if (s == J1_A_SERVO) {
+    if (s == SERVO_J1_A) {
         j1_a_allowed_range(&l, &h);
 
-        float v2 = g_joint_limits[J1_B_SERVO].max_deg_s;
+        float v2 = g_joint_limits[SERVO_J1_B].max_deg_s;
         if (v2 < v) v = v2;
     }
 
@@ -433,7 +426,7 @@ void servo_set_angle(int servo_id, float angle)
     float lo = g_joint_limits[master].min_deg;
     float hi = g_joint_limits[master].max_deg;
 
-    if (master == J1_A_SERVO) {
+    if (master == SERVO_J1_A) {
         j1_a_allowed_range(&lo, &hi);
     }
 
@@ -508,12 +501,12 @@ bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
     bool ok = true;
 
     for (int i = 0; i < SERVO_COUNT; i++) {
-        if (i == J1_B_SERVO) continue;
+        if (i == SERVO_J1_B) continue;
 
         float lo = g_joint_limits[i].min_deg;
         float hi = g_joint_limits[i].max_deg;
 
-        if (i == J1_A_SERVO) {
+        if (i == SERVO_J1_A) {
             j1_a_allowed_range(&lo, &hi);
         }
 
@@ -521,14 +514,14 @@ bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
         if (clamp) q[i] = clampf(q[i], lo, hi);
     }
 
-    float b = j1_b_from_j1_a(q[J1_A_SERVO]);
-    float blo = g_joint_limits[J1_B_SERVO].min_deg;
-    float bhi = g_joint_limits[J1_B_SERVO].max_deg;
+    float b = j1_b_from_j1_a(q[SERVO_J1_A]);
+    float blo = g_joint_limits[SERVO_J1_B].min_deg;
+    float bhi = g_joint_limits[SERVO_J1_B].max_deg;
 
     if (b < blo || b > bhi) ok = false;
     if (clamp) b = clampf(b, blo, bhi);
 
-    q[J1_B_SERVO] = b;
+    q[SERVO_J1_B] = b;
     return ok;
 }
 
@@ -537,8 +530,6 @@ bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
     (void)pitch_deg;
 
     // SIMPLE PLANAR IK FOR TUNING:
-    // Geometrie se řeší od osy J1, která je od J0 posunutá dopředu o J1_X_OFFSET.
-    // Tool length / TCP pitch jsou zatím ignorované.
     const float r_j1 = planar_radius_from_j1(x, y);
     const float z_sh = z - L0;
     const float d = sqrtf(r_j1*r_j1 + z_sh*z_sh);
@@ -547,7 +538,7 @@ bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
     if (d < fabsf(L1 - L2)) return false;
     return true;
 
-    // FULL TCP REACHABILITY (kept for later TCP phase):
+    // FULL TCP REACHABILITY:
     // float r = sqrtf(x*x + y*y);
     // float phi = DEG2RAD(pitch_deg);
     //
@@ -598,7 +589,7 @@ static bool inverse_kinematics_simple(float x, float y, float z,
     const float r_base = planar_radius_from_base(x, y);
     const float r_j1   = planar_radius_from_j1(x, y);
 
-    // Base rotation pořád z globálních x,y vůči J0
+    // Base rotation from global x,y
     float q0;
     if (r_base < 1e-6f) {
         float d0 = DIR[SERVO_J0];
@@ -608,7 +599,7 @@ static bool inverse_kinematics_simple(float x, float y, float z,
         q0 = atan2f(y, x);
     }
 
-    // Simple planar IK for point J3, geometrie od J1
+    // Simple planar IK for point J3, geomeetry is solved from J1
     const float z_sh = z - L0;
     const float d2   = r_j1*r_j1 + z_sh*z_sh;
     const float d    = sqrtf(d2);
@@ -634,7 +625,7 @@ static bool inverse_kinematics_simple(float x, float y, float z,
     for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
 
     cand[SERVO_J0]   = map_servo(SERVO_J0,   j0);
-    cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
+    cand[SERVO_J1_A] = map_servo(SERVO_J1_A, j1);
     cand[SERVO_J2]   = map_servo(SERVO_J2,   j2);
 
     cand[SERVO_J3] = HOME_J3;
@@ -662,7 +653,7 @@ static bool inverse_kinematics_simple(float x, float y, float z,
     return true;
 }
 
-// FULL TCP IK KEPT FOR LATER TCP / TOOL PHASE:
+// FULL TCP IK:
 // static bool inverse_kinematics_tcp(float x, float y, float z,
 //                                    float tool_pitch_deg,
 //                                    float q_target[SERVO_COUNT])
@@ -732,7 +723,7 @@ static bool inverse_kinematics_simple(float x, float y, float z,
 //         for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
 
 //         cand[SERVO_J0]   = map_servo(SERVO_J0,   j0);
-//         cand[J1_A_SERVO] = map_servo(J1_A_SERVO, j1);
+//         cand[SERVO_J1_A] = map_servo(SERVO_J1_A, j1);
 //         cand[SERVO_J2]   = map_servo(SERVO_J2,   j2);
 //         cand[SERVO_J3]   = map_servo(SERVO_J3,   j3);
 
@@ -741,7 +732,7 @@ static bool inverse_kinematics_simple(float x, float y, float z,
 
 //         float cost = 0.0f;
 //         cost += fabsf(cand[SERVO_J0]   - s_last_q[SERVO_J0]);
-//         cost += fabsf(cand[J1_A_SERVO] - s_last_q[J1_A_SERVO]);
+//         cost += fabsf(cand[SERVO_J1_A] - s_last_q[SERVO_J1_A]);
 //         cost += fabsf(cand[SERVO_J2]   - s_last_q[SERVO_J2]);
 //         cost += fabsf(cand[SERVO_J3]   - s_last_q[SERVO_J3]);
 
@@ -876,7 +867,7 @@ static void robot_control_task(void *arg)
                          cmd.x, cmd.y, cmd.z, pitch);
 
                 bool ok = inverse_kinematics_simple(cmd.x, cmd.y, cmd.z, seg.q1);
-                // Future TCP version kept above as comments:
+                // Future TCP version
                 // bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
                 if (!ok) {
                     ESP_LOGW(TAG, "IK SIMPLE failed");
@@ -893,8 +884,7 @@ static void robot_control_task(void *arg)
                 seg.tcp_target_base.x = cmd.x;
                 seg.tcp_target_base.y = cmd.y;
                 seg.tcp_target_base.z = cmd.z;
-                // During simple planar IK tuning, pitch is not really solved.
-                // We still keep it in the estimate as metadata so the current API stays intact.
+                // During simple planar IK tuning, pitch is not solved
                 seg.tcp_target_base.pitch_deg = pitch;
             }
             else if (cmd.type == ROBOT_CMD_MOVE_JOINTS_T) {
@@ -1115,7 +1105,7 @@ bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SER
     (void)pitch_deg;
 
     if (!inverse_kinematics_simple(x, y, z, q_target)) return false;
-    // Future TCP version kept above as comments:
+    // Future TCP version
     // if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
 
     robot_validate_and_prepare_q(q_target, true);
@@ -1150,10 +1140,3 @@ void robot_core_run_gcode(const char *filename)
         free(params);
     }
 }
-
-// mám papír a ten je 0,5 mm čtvrečkovaný jde o to že když se podívám na osu J0 (střed serva 0 ) tak je vzdálená od toho papíru cca 70 mm a pak je do výšky p7
-// Z   |  naměřeno
-// 40      51,9
-// 70      74,6
-// 90      94,5
-// 120     121,6
