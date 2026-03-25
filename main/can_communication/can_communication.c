@@ -91,7 +91,7 @@ static void can_log_frame(const char *prefix, const twai_message_t *msg)
         p += written;
     }
 
-    ESP_LOGI(TAG, "%s id=0x%03" PRIX32 " dlc=%u extd=%u rtr=%u data=[%s]",
+    ESP_LOGD(TAG, "%s id=0x%03" PRIX32 " dlc=%u extd=%u rtr=%u data=[%s]",
              prefix,
              msg->identifier,
              (unsigned)msg->data_length_code,

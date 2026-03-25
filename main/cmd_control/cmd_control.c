@@ -269,7 +269,24 @@ static int cmd_sensors(int argc, char **argv)
 {
     (void)argc; (void)argv;
     int64_t t_start_us = esp_timer_get_time();
-    for (int i = 0; i < SENSOR_COUNT; i++) printf("Sensor %d: %.1f°\n", i, sensor_read_angle(i));
+
+    const int joint_to_servo[JOINT_COUNT] = {
+        JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
+    };
+
+    bool use_adc_sensors = (ROBOT_USE_SENSORS != 0) && robot_sensors_initialized();
+    if (use_adc_sensors) {
+        for (int i = 0; i < SENSOR_COUNT; i++) {
+            printf("Sensor %d: %.1f deg\n", i, sensor_read_angle(i));
+        }
+    } else {
+        printf("Sensors unavailable, showing estimated joint angles:\n");
+        for (int j = 0; j < JOINT_COUNT; j++) {
+            int s = joint_to_servo[j];
+            printf("Joint %d (servo %d): %.1f deg\n", j, s, robot_get_est_angle(s));
+        }
+    }
+
     int64_t t_end_us = esp_timer_get_time();
     int64_t dt_us = t_end_us - t_start_us;
     rt_stats_add_sample(&g_sensors_cmd_stats, dt_us);
@@ -490,7 +507,7 @@ static void register_commands(void)
     const esp_console_cmd_t cmds[] = {
         { .command = "joint",  .help = "Set joint angle: joint <id> <angle>", .func = &cmd_joint },
         { .command = "move",   .help = "Move in WORK frame: move <x> <y> <z> [pitch] (pitch ignored for now)", .func = &cmd_move },
-        { .command = "sensors",.help = "Print joint angles from sensors", .func = &cmd_sensors },
+        { .command = "sensors",.help = "Print sensor angles or estimated joint angles when sensors are unavailable", .func = &cmd_sensors },
         { .command = "test",   .help = "Run simple XYZ test motion sequence in WORK frame", .func = &cmd_test },
         { .command = "print",  .help = "Print file content: print <path>", .func = &cmd_print_file },
         { .command = "ls",     .help = "List files in storage", .func = &cmd_ls },
@@ -517,12 +534,12 @@ void cmd_control_start(void)
 {
     esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
     esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
-    repl_cfg.prompt = ">";
-    repl_cfg.max_history_len = 5;
+
+    repl_cfg.prompt = ">> ";
+    repl_cfg.max_history_len = 1;
     repl_cfg.max_cmdline_length = CMD_BUF_SIZE;
     repl_cfg.task_stack_size = 4096;
     repl_cfg.task_priority = 5;
-    repl_cfg.task_core_id = CORE_ROBOT;
 
     esp_err_t err = esp_console_new_repl_uart(&uart_cfg, &repl_cfg, &s_repl);
     if (err != ESP_OK) {
@@ -532,9 +549,7 @@ void cmd_control_start(void)
 
     register_commands();
 
-    // Force full line editor mode for idf.py monitor (history/arrows/TAB).
-    linenoiseSetDumbMode(0);
-    // Single-line mode keeps redraw behavior less aggressive while typing.
+    linenoiseSetDumbMode(1);
     linenoiseSetMultiLine(0);
 
     err = esp_console_start_repl(s_repl);
@@ -543,6 +558,6 @@ void cmd_control_start(void)
         return;
     }
 
-    ESP_LOGI(TAG, "console REPL started on core %d", CORE_ROBOT);
+    ESP_LOGI(TAG, "console REPL started on core %d", CORE_COMM);
     rt_stats_reset(&g_sensors_cmd_stats);
 }

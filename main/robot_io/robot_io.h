@@ -120,6 +120,7 @@ void sensors_init(void);
 
 int   sensor_read_raw(int id);
 float sensor_read_angle(int id);
+bool  robot_sensors_initialized(void);
 
 void servo_set_angle(int servo_id, float angle);
 void joint_set_angle(int joint_id, float angle);

@@ -25,6 +25,11 @@
       const PITCH_MIN = -90;
       const PITCH_MAX = 90;
       const PITCH_DEFAULT = 20;
+      const XYZ_AXES = ["x", "y", "z"];
+
+      let measurementSeries = [];
+      let measurementIndex = -1;
+      let lastMoveCommand = "";
 
       function lockJoint(jid, ms = 800) {
         jointEditUntil[jid] = Date.now() + ms;
@@ -329,24 +334,252 @@
         localStorage.setItem("pitch_deg", String(pv));
       }
 
+      function formatCmdNumber(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return "0";
+        if (Number.isInteger(n)) return String(n);
+        return n.toFixed(3).replace(/\.?0+$/, "");
+      }
+
+      function setLastMoveCommand(x, y, z, pitch) {
+        lastMoveCommand = `move ${formatCmdNumber(x)} ${formatCmdNumber(y)} ${formatCmdNumber(z)} pitch ${formatCmdNumber(pitch)}`;
+        const el = document.getElementById("last-command-text");
+        if (el) el.textContent = lastMoveCommand;
+      }
+
+      function updateJogReadouts() {
+        XYZ_AXES.forEach((axis) => {
+          const input = document.getElementById(axis);
+          const out = document.getElementById(`jog-${axis}-value`);
+          if (!input || !out) return;
+          out.textContent = formatCmdNumber(input.value);
+        });
+      }
+
+      function setXYZValues(x, y, z) {
+        const xEl = document.getElementById("x");
+        const yEl = document.getElementById("y");
+        const zEl = document.getElementById("z");
+        if (!xEl || !yEl || !zEl) return;
+        xEl.value = x;
+        yEl.value = y;
+        zEl.value = z;
+        updateJogReadouts();
+      }
+
+      function jogAxis(axis, delta) {
+        const input = document.getElementById(axis);
+        if (!input) return;
+
+        const current = Number(input.value);
+        const next = (Number.isFinite(current) ? current : 0) + Number(delta);
+        input.value = next;
+        updateJogReadouts();
+
+        const auto = document.getElementById("jog_auto_send");
+        if (auto && auto.checked) moveXYZ();
+      }
+
+      function buildMeasurementSeries(zStart, zStop, zStep) {
+        const step = Math.abs(Number(zStep));
+        const start = Number(zStart);
+        const stop = Number(zStop);
+
+        if (!Number.isFinite(start) || !Number.isFinite(stop) || !Number.isFinite(step) || step <= 0) {
+          return [];
+        }
+
+        if (start === stop) return [start];
+
+        const dir = stop >= start ? 1 : -1;
+        const values = [];
+        let z = start;
+        while ((dir > 0 && z <= stop) || (dir < 0 && z >= stop)) {
+          values.push(Number(z.toFixed(6)));
+          z += dir * step;
+        }
+
+        if (values.length === 0 || Math.abs(values[values.length - 1] - stop) > 1e-9) {
+          values.push(stop);
+        }
+
+        return values;
+      }
+
+      function invalidateMeasurementSeries() {
+        measurementSeries = [];
+        measurementIndex = -1;
+        updateMeasurementStatus("Series needs prepare");
+      }
+
+      function currentMeasurementPoint() {
+        if (!measurementSeries.length) return null;
+        const x = Number(document.getElementById("meas_x")?.value);
+        const y = Number(document.getElementById("meas_y")?.value);
+        const z = measurementSeries[measurementIndex];
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+        return { x, y, z };
+      }
+
+      function updateMeasurementStatus(message = "") {
+        const statusEl = document.getElementById("measurement-status");
+        const previewEl = document.getElementById("measurement-preview");
+
+        const x = Number(document.getElementById("meas_x")?.value);
+        const y = Number(document.getElementById("meas_y")?.value);
+        if (previewEl) {
+          if (!measurementSeries.length || !Number.isFinite(x) || !Number.isFinite(y)) {
+            previewEl.textContent = "-";
+          } else {
+            previewEl.textContent = measurementSeries
+              .map((z) => `${formatCmdNumber(x)} ${formatCmdNumber(y)} ${formatCmdNumber(z)}`)
+              .join(" | ");
+          }
+        }
+
+        if (!statusEl) return;
+
+        if (!measurementSeries.length) {
+          statusEl.textContent = message || "Series not prepared";
+          return;
+        }
+
+        const idx = clamp(measurementIndex, 0, measurementSeries.length - 1);
+        const z = measurementSeries[idx];
+        const detail = `Point ${idx + 1}/${measurementSeries.length} ready: X ${formatCmdNumber(x)}, Y ${formatCmdNumber(y)}, Z ${formatCmdNumber(z)}`;
+        statusEl.textContent = message ? `${message}. ${detail}` : detail;
+      }
+
+      function prepareMeasurementSeries() {
+        const x = Number(document.getElementById("meas_x")?.value);
+        const y = Number(document.getElementById("meas_y")?.value);
+        const zStart = Number(document.getElementById("meas_z_start")?.value);
+        const zStop = Number(document.getElementById("meas_z_stop")?.value);
+        const zStep = Number(document.getElementById("meas_z_step")?.value);
+
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(zStart) || !Number.isFinite(zStop) || !Number.isFinite(zStep)) {
+          alert("Measurement mode: enter valid numbers");
+          return false;
+        }
+
+        measurementSeries = buildMeasurementSeries(zStart, zStop, zStep);
+        if (!measurementSeries.length) {
+          alert("Measurement mode: step must be non-zero");
+          return false;
+        }
+
+        measurementIndex = 0;
+        setXYZValues(x, y, measurementSeries[measurementIndex]);
+        updateMeasurementStatus("Series prepared");
+        return true;
+      }
+
+      function loadMeasurementStart() {
+        if (!prepareMeasurementSeries()) return;
+        updateMeasurementStatus("Start point loaded");
+      }
+
+      function sendMeasurementPoint() {
+        if (!measurementSeries.length && !prepareMeasurementSeries()) return;
+        const point = currentMeasurementPoint();
+        if (!point) {
+          alert("Measurement mode: invalid current point");
+          return;
+        }
+        setXYZValues(point.x, point.y, point.z);
+        moveXYZ();
+        updateMeasurementStatus("Point sent");
+      }
+
+      function nextMeasurementPoint() {
+        if (!measurementSeries.length && !prepareMeasurementSeries()) return;
+        if (measurementIndex >= measurementSeries.length - 1) {
+          updateMeasurementStatus("End of series");
+          alert("Measurement mode: end of Z series");
+          return;
+        }
+
+        measurementIndex += 1;
+        const point = currentMeasurementPoint();
+        if (!point) {
+          alert("Measurement mode: invalid next point");
+          return;
+        }
+
+        setXYZValues(point.x, point.y, point.z);
+        moveXYZ();
+        updateMeasurementStatus("Next point sent");
+      }
+
+      function applyPresetXY() {
+        const xEl = document.getElementById("meas_x");
+        const yEl = document.getElementById("meas_y");
+        if (xEl) xEl.value = 100;
+        if (yEl) yEl.value = 0;
+        invalidateMeasurementSeries();
+      }
+
+      function applyPresetZSeries() {
+        const startEl = document.getElementById("meas_z_start");
+        const stopEl = document.getElementById("meas_z_stop");
+        const stepEl = document.getElementById("meas_z_step");
+        if (startEl) startEl.value = 60;
+        if (stopEl) stopEl.value = 110;
+        if (stepEl) stepEl.value = 10;
+        invalidateMeasurementSeries();
+      }
+
+      function applyMeasurementPreset() {
+        applyPresetXY();
+        applyPresetZSeries();
+        prepareMeasurementSeries();
+      }
+
+      async function copyLastCommand() {
+        if (!lastMoveCommand) {
+          alert("No move command sent yet.");
+          return;
+        }
+
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(lastMoveCommand);
+            return;
+          }
+
+          const helper = document.createElement("textarea");
+          helper.value = lastMoveCommand;
+          helper.style.position = "fixed";
+          helper.style.left = "-9999px";
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand("copy");
+          document.body.removeChild(helper);
+        } catch (e) {
+          alert("Copy failed.");
+        }
+      }
+
       function moveXYZ() {
         if (!ws || ws.readyState !== 1) {
           alert("WebSocket not connected.");
           return;
         }
 
-        const x = parseFloat(document.getElementById("x").value);
-        const y = parseFloat(document.getElementById("y").value);
-        const z = parseFloat(document.getElementById("z").value);
+        const x = Number(document.getElementById("x")?.value);
+        const y = Number(document.getElementById("y")?.value);
+        const z = Number(document.getElementById("z")?.value);
         const pitch = getPitchDeg();
 
-        if (isNaN(x) || isNaN(y) || isNaN(z)) {
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
           alert("Please enter valid numbers");
           return;
         }
 
         setPitchDeg(pitch);
         ws.send(JSON.stringify({ cmd: "move_xyz", x: x, y: y, z: z, pitch: pitch }));
+        setLastMoveCommand(x, y, z, pitch);
+        updateJogReadouts();
       }
 
       function sendGcodeLine() {
@@ -532,6 +765,22 @@
         value.textContent = clamped.toFixed(1) + "°";
       }
 
+      function installMoveTools() {
+        XYZ_AXES.forEach((axis) => {
+          const el = document.getElementById(axis);
+          if (!el) return;
+          el.addEventListener("input", updateJogReadouts);
+          el.addEventListener("change", updateJogReadouts);
+        });
+
+        ["meas_x", "meas_y", "meas_z_start", "meas_z_stop", "meas_z_step"].forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener("input", invalidateMeasurementSeries);
+          el.addEventListener("change", invalidateMeasurementSeries);
+        });
+      }
+
       function boot() {
         const gauges = document.querySelectorAll(".gauge");
         gauges.forEach((g) => createGauge(g, g.dataset.id));
@@ -553,6 +802,10 @@
           pitchRng.addEventListener("input", () => setPitchDeg(pitchRng.value));
           pitchRng.addEventListener("change", () => setPitchDeg(pitchRng.value));
         }
+
+        installMoveTools();
+        updateJogReadouts();
+        updateMeasurementStatus("Series not prepared");
 
         initWS();
         loadFiles();

@@ -61,10 +61,10 @@ void gcode_stop(void)
 static void strip_comment(char *s)
 {
     char *c = strchr(s, ';');
-    if (c) *c = 0;
+    if (c) *c = '\0';
 
     size_t n = strlen(s);
-    while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t')) s[--n] = 0;
+    while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t')) s[--n] = '\0';
 }
 
 static bool parse_word(const char *p, char key, float *out)
@@ -90,15 +90,24 @@ static bool send_xyz_blocking(float x, float y, float z, float pitch_deg, TickTy
     return false;
 }
 
+static bool gcode_abort(const char *msg)
+{
+    ESP_LOGE(TAG, "%s", msg);
+    s_error = true;
+    s_stop = true;
+    robot_cmd_queue_flush();
+    return false;
+}
+
 bool gcode_push_line(const char *line_in)
 {
     char line[200];
     strncpy(line, line_in, sizeof(line) - 1);
-    line[sizeof(line) - 1] = 0;
+    line[sizeof(line) - 1] = '\0';
     strip_comment(line);
-    if (line[0] == 0) return true;
+    if (line[0] == '\0') return true;
 
-    float g = -1, f = 0, x = 0, y = 0, z = 0;
+    float g = -1.0f, f = 0.0f, x = 0.0f, y = 0.0f, z = 0.0f;
     float p = 0.0f;
 
     bool hasG = parse_word(line, 'G', &g);
@@ -108,73 +117,61 @@ bool gcode_push_line(const char *line_in)
     bool hasZ = parse_word(line, 'Z', &z);
     bool hasP = parse_word(line, 'P', &p);
 
-    float pitch_deg = hasP ? p : st.pitch_deg;
-
-    if (hasG) {
-        int gi = (int)lroundf(g);
-
-        if (gi == 90) { st.absolute = true; return true; }
-        if (gi == 91) { st.absolute = false; return true; }
-        if (gi == 20) { st.units_mm = false; return true; }
-        if (gi == 21) { st.units_mm = true; return true; }
-
-        if (gi == 0 || gi == 1) {
-            if (!robot_is_referenced()) {
-                ESP_LOGE(TAG, "Robot is not referenced. Run HOME/reference first.");
-                s_error = true;
-                s_stop = true;
-                robot_cmd_queue_flush();
-                return false;
-            }
-
-            if (!robot_has_tcp_estimate()) {
-                ESP_LOGE(TAG, "Robot TCP pose is unknown. Use HOME or cartesian move before G-code.");
-                s_error = true;
-                s_stop = true;
-                robot_cmd_queue_flush();
-                return false;
-            }
-
-            if (hasF) {
-                float v_mm_min = to_mm(f);
-                st.feed_mm_s = v_mm_min / 60.0f;
-                if (st.feed_mm_s < MIN_V_MM_S) st.feed_mm_s = MIN_V_MM_S;
-            }
-
-            float tx = st.x, ty = st.y, tz = st.z;
-            if (hasX) tx = st.absolute ? to_mm(x) : (st.x + to_mm(x));
-            if (hasY) ty = st.absolute ? to_mm(y) : (st.y + to_mm(y));
-            if (hasZ) tz = st.absolute ? to_mm(z) : (st.z + to_mm(z));
-
-            if (!robot_tcp_reachable_work(tx, ty, tz, pitch_deg)) {
-                ESP_LOGE(TAG, "Unreachable WORK XYZ: x=%.2f y=%.2f z=%.2f pitch=%.2f", tx, ty, tz, pitch_deg);
-                s_error = true;
-                s_stop = true;
-                robot_cmd_queue_flush();
-                return false;
-            }
-
-            if (!send_xyz_blocking(tx, ty, tz, pitch_deg, pdMS_TO_TICKS(8000))) {
-                ESP_LOGE(TAG, "Queue timeout sending WORK XYZ");
-                s_error = true;
-                s_stop = true;
-                return false;
-            }
-
-            st.x = tx;
-            st.y = ty;
-            st.z = tz;
-            st.pitch_deg = pitch_deg;
-            return true;
-        }
-    }
-
     if (hasF && !hasG) {
         float v_mm_min = to_mm(f);
         st.feed_mm_s = v_mm_min / 60.0f;
         if (st.feed_mm_s < MIN_V_MM_S) st.feed_mm_s = MIN_V_MM_S;
+        return true;
     }
 
+    if (!hasG) return true;
+
+    int gi = (int)lroundf(g);
+    if (gi == 90) { st.absolute = true; return true; }
+    if (gi == 91) { st.absolute = false; return true; }
+    if (gi == 20) { st.units_mm = false; return true; }
+    if (gi == 21) { st.units_mm = true; return true; }
+
+    if (gi == 0 || gi == 1) {
+        if (!robot_is_referenced()) {
+            return gcode_abort("Robot is not referenced. Run HOME/reference first.");
+        }
+
+        if (!robot_has_tcp_estimate()) {
+            return gcode_abort("Robot TCP pose is unknown. Use HOME or cartesian move before G-code.");
+        }
+
+        if (hasF) {
+            float v_mm_min = to_mm(f);
+            st.feed_mm_s = v_mm_min / 60.0f;
+            if (st.feed_mm_s < MIN_V_MM_S) st.feed_mm_s = MIN_V_MM_S;
+        }
+
+        float pitch_deg = hasP ? p : st.pitch_deg;
+        float tx = st.x, ty = st.y, tz = st.z;
+        if (hasX) tx = st.absolute ? to_mm(x) : (st.x + to_mm(x));
+        if (hasY) ty = st.absolute ? to_mm(y) : (st.y + to_mm(y));
+        if (hasZ) tz = st.absolute ? to_mm(z) : (st.z + to_mm(z));
+
+        if (!robot_tcp_reachable_work(tx, ty, tz, pitch_deg)) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "Unreachable WORK XYZ: x=%.2f y=%.2f z=%.2f pitch=%.2f",
+                     tx, ty, tz, pitch_deg);
+            return gcode_abort(msg);
+        }
+
+        if (!send_xyz_blocking(tx, ty, tz, pitch_deg, pdMS_TO_TICKS(8000))) {
+            return gcode_abort("Queue timeout sending WORK XYZ");
+        }
+
+        st.x = tx;
+        st.y = ty;
+        st.z = tz;
+        st.pitch_deg = pitch_deg;
+        return true;
+    }
+
+    // Ignore unknown G-codes to stay compatible with common files (e.g. G2/G3/G28).
     return true;
 }
 
@@ -185,18 +182,15 @@ bool gcode_run_file(const char *filename)
     s_error = false;
 
     if (!robot_is_referenced()) {
-        ESP_LOGE(TAG, "Cannot run G-code: robot is not referenced");
-        return false;
+        return gcode_abort("Cannot run G-code: robot is not referenced");
     }
 
     if (!robot_has_tcp_estimate()) {
-        ESP_LOGE(TAG, "Cannot run G-code: current TCP pose is unknown");
-        return false;
+        return gcode_abort("Cannot run G-code: current TCP pose is unknown");
     }
 
-    if (!filename || filename[0] == 0) {
-        ESP_LOGE(TAG, "Empty filename");
-        return false;
+    if (!filename || filename[0] == '\0') {
+        return gcode_abort("Empty filename");
     }
 
     char path1[256];

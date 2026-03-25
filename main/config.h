@@ -160,14 +160,21 @@
 // ROBOT: ARM GEOMETRY (mm)
 // ===============================
 #define L0 81.9f            //75.5f // height of J0 above the base
-#define J1_X_OFFSET  18.0f  // offset from J0 to the vertical plane of J1
-#define L1  107.5f          // J1 -> J2
-#define L2   74.5f          // J2 -> J3
+#define J1_X_OFFSET  18.2f  // offset from J0 to the vertical plane of J1
+
+// #define L1  116.0f
+// #define L2   79.5f
+
+#define L1 115.9f
+#define L2 79.4f
+
+//#define L1  107.5f          // J1 -> J2
+//#define L2   74.5f          // J2 -> J3
 #define L3   58.8f          // J3 -> J4
 #define L4_OPEN   70.0f     // J4 -> gripper closed (90 degree)
 #define L4_CLOSED 54.6f     // J4 -> gripper open (0 degree)
 
-// Tool length
+// Tool length;;
 #define L_TOOL_OPEN   (L3 + L4_OPEN)    // 128.8 mm
 #define L_TOOL_CLOSED (L3 + L4_CLOSED)  // 113.4 mm
 
