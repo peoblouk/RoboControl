@@ -61,6 +61,125 @@ body {
   width: 90%;
 }
 
+.tool-panel {
+  margin: 1em 0;
+  padding: 1em;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.button-row button {
+  flex: 1 1 140px;
+  margin-bottom: 0;
+}
+
+.jog-row {
+  display: grid;
+  grid-template-columns: 28px repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.jog-axis {
+  font-weight: 700;
+  color: #0078d7;
+}
+
+.jog-btn {
+  width: 100%;
+  margin-bottom: 0;
+  padding: 0.55em 0.4em;
+}
+
+.jog-value {
+  display: inline-block;
+  width: 100%;
+  min-width: 56px;
+  padding: 0.55em 0.4em;
+  border-radius: 5px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #0f172a;
+}
+
+.inline-check input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.measurement-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.measurement-grid .form-group {
+  margin-bottom: 0;
+}
+
+.measurement-grid .form-group:last-child {
+  grid-column: 1 / -1;
+}
+
+.measurement-status {
+  margin-top: 10px;
+  font-size: 0.95em;
+  color: #0f172a;
+}
+
+.measurement-preview {
+  margin-top: 8px;
+  text-align: left;
+  word-break: break-word;
+}
+
+.measurement-preview code {
+  display: inline;
+  background: #e2e8f0;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.small-label {
+  font-size: 0.9em;
+  color: #475569;
+  margin-right: 6px;
+}
+
+.last-command-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.last-command-row code {
+  flex: 1;
+  min-width: 150px;
+  text-align: left;
+  background: #e2e8f0;
+  border-radius: 4px;
+  padding: 8px 10px;
+  word-break: break-all;
+}
+
 h1 {
   margin-bottom: 1em;
   color: #0078d7;
@@ -68,6 +187,7 @@ h1 {
 
 input[type="number"],
 input[type="file"],
+select,
 button {
   padding: 0.8em;
   width: 100%;
@@ -132,6 +252,24 @@ button:hover {
 
   h1 {
     font-size: 1.4em;
+  }
+
+  .measurement-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .jog-row {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .jog-axis {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .jog-value {
+    grid-column: 1 / -1;
+    text-align: center;
   }
 }
 

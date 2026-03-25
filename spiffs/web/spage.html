@@ -26,6 +26,7 @@
       const PITCH_MAX = 90;
       const PITCH_DEFAULT = 20;
       const XYZ_AXES = ["x", "y", "z"];
+      const MEAS_X_FIXED_Z = 90;
 
       let measurementSeries = [];
       let measurementIndex = -1;
@@ -380,10 +381,45 @@
         if (auto && auto.checked) moveXYZ();
       }
 
-      function buildMeasurementSeries(zStart, zStop, zStep) {
-        const step = Math.abs(Number(zStep));
-        const start = Number(zStart);
-        const stop = Number(zStop);
+      function getMeasurementAxis() {
+        const axis = String(document.getElementById("meas_axis")?.value || "z").toLowerCase();
+        return axis === "x" ? "x" : "z";
+      }
+
+      function axisLabel(axis) {
+        return String(axis || "").toUpperCase();
+      }
+
+      function updateMeasurementAxisUI() {
+        const axis = getMeasurementAxis();
+        const up = axisLabel(axis);
+
+        const axisValueLabel = document.getElementById("meas_axis_value_label");
+        const startLabel = document.getElementById("meas_sweep_start_label");
+        const stopLabel = document.getElementById("meas_sweep_stop_label");
+        const stepLabel = document.getElementById("meas_sweep_step_label");
+        const zValueEl = document.getElementById("meas_z");
+
+        if (axisValueLabel) axisValueLabel.textContent = axis === "x" ? `Z fixed [mm]` : `Z value [mm]`;
+        if (startLabel) startLabel.textContent = `${up} start [mm]`;
+        if (stopLabel) stopLabel.textContent = `${up} stop [mm]`;
+        if (stepLabel) stepLabel.textContent = `${up} step [mm]`;
+        if (zValueEl) {
+          if (axis === "x") {
+            zValueEl.value = MEAS_X_FIXED_Z;
+            zValueEl.disabled = true;
+          } else {
+            zValueEl.disabled = false;
+          }
+        }
+
+        updateMeasurementStatus();
+      }
+
+      function buildMeasurementSeries(startValue, stopValue, stepValue) {
+        const step = Math.abs(Number(stepValue));
+        const start = Number(startValue);
+        const stop = Number(stopValue);
 
         if (!Number.isFinite(start) || !Number.isFinite(stop) || !Number.isFinite(step) || step <= 0) {
           return [];
@@ -393,10 +429,10 @@
 
         const dir = stop >= start ? 1 : -1;
         const values = [];
-        let z = start;
-        while ((dir > 0 && z <= stop) || (dir < 0 && z >= stop)) {
-          values.push(Number(z.toFixed(6)));
-          z += dir * step;
+        let value = start;
+        while ((dir > 0 && value <= stop) || (dir < 0 && value >= stop)) {
+          values.push(Number(value.toFixed(6)));
+          value += dir * step;
         }
 
         if (values.length === 0 || Math.abs(values[values.length - 1] - stop) > 1e-9) {
@@ -414,10 +450,19 @@
 
       function currentMeasurementPoint() {
         if (!measurementSeries.length) return null;
-        const x = Number(document.getElementById("meas_x")?.value);
-        const y = Number(document.getElementById("meas_y")?.value);
-        const z = measurementSeries[measurementIndex];
-        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+        const axis = getMeasurementAxis();
+        const xBase = Number(document.getElementById("meas_x")?.value);
+        const yBase = Number(document.getElementById("meas_y")?.value);
+        const zBase = axis === "x" ? MEAS_X_FIXED_Z : Number(document.getElementById("meas_z")?.value);
+        const sweepValue = measurementSeries[measurementIndex];
+
+        if (!Number.isFinite(xBase) || !Number.isFinite(yBase) || !Number.isFinite(zBase) || !Number.isFinite(sweepValue)) {
+          return null;
+        }
+
+        const x = axis === "x" ? sweepValue : xBase;
+        const y = yBase;
+        const z = axis === "z" ? sweepValue : zBase;
         return { x, y, z };
       }
 
@@ -425,14 +470,22 @@
         const statusEl = document.getElementById("measurement-status");
         const previewEl = document.getElementById("measurement-preview");
 
-        const x = Number(document.getElementById("meas_x")?.value);
-        const y = Number(document.getElementById("meas_y")?.value);
+        const axis = getMeasurementAxis();
+        const axisUp = axisLabel(axis);
+        const xBase = Number(document.getElementById("meas_x")?.value);
+        const yBase = Number(document.getElementById("meas_y")?.value);
+        const zBase = axis === "x" ? MEAS_X_FIXED_Z : Number(document.getElementById("meas_z")?.value);
         if (previewEl) {
-          if (!measurementSeries.length || !Number.isFinite(x) || !Number.isFinite(y)) {
+          if (!measurementSeries.length || !Number.isFinite(xBase) || !Number.isFinite(yBase) || !Number.isFinite(zBase)) {
             previewEl.textContent = "-";
           } else {
             previewEl.textContent = measurementSeries
-              .map((z) => `${formatCmdNumber(x)} ${formatCmdNumber(y)} ${formatCmdNumber(z)}`)
+              .map((sweepValue) => {
+                const x = axis === "x" ? sweepValue : xBase;
+                const y = yBase;
+                const z = axis === "z" ? sweepValue : zBase;
+                return `${formatCmdNumber(x)} ${formatCmdNumber(y)} ${formatCmdNumber(z)}`;
+              })
               .join(" | ");
           }
         }
@@ -445,32 +498,45 @@
         }
 
         const idx = clamp(measurementIndex, 0, measurementSeries.length - 1);
-        const z = measurementSeries[idx];
-        const detail = `Point ${idx + 1}/${measurementSeries.length} ready: X ${formatCmdNumber(x)}, Y ${formatCmdNumber(y)}, Z ${formatCmdNumber(z)}`;
+        const point = currentMeasurementPoint();
+        if (!point) {
+          statusEl.textContent = message || "Series prepared but current point invalid";
+          return;
+        }
+        const sweepValue = measurementSeries[idx];
+        const detail = `Point ${idx + 1}/${measurementSeries.length} ready: X ${formatCmdNumber(point.x)}, Y ${formatCmdNumber(point.y)}, Z ${formatCmdNumber(point.z)} (${axisUp}=${formatCmdNumber(sweepValue)})`;
         statusEl.textContent = message ? `${message}. ${detail}` : detail;
       }
 
       function prepareMeasurementSeries() {
-        const x = Number(document.getElementById("meas_x")?.value);
-        const y = Number(document.getElementById("meas_y")?.value);
-        const zStart = Number(document.getElementById("meas_z_start")?.value);
-        const zStop = Number(document.getElementById("meas_z_stop")?.value);
-        const zStep = Number(document.getElementById("meas_z_step")?.value);
+        const axis = getMeasurementAxis();
+        const xBase = Number(document.getElementById("meas_x")?.value);
+        const yBase = Number(document.getElementById("meas_y")?.value);
+        const zBase = axis === "x" ? MEAS_X_FIXED_Z : Number(document.getElementById("meas_z")?.value);
+        const startValue = Number(document.getElementById("meas_start")?.value);
+        const stopValue = Number(document.getElementById("meas_stop")?.value);
+        const stepValue = Number(document.getElementById("meas_step")?.value);
 
-        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(zStart) || !Number.isFinite(zStop) || !Number.isFinite(zStep)) {
+        if (!Number.isFinite(xBase) || !Number.isFinite(yBase) || !Number.isFinite(zBase) ||
+            !Number.isFinite(startValue) || !Number.isFinite(stopValue) || !Number.isFinite(stepValue)) {
           alert("Measurement mode: enter valid numbers");
           return false;
         }
 
-        measurementSeries = buildMeasurementSeries(zStart, zStop, zStep);
+        measurementSeries = buildMeasurementSeries(startValue, stopValue, stepValue);
         if (!measurementSeries.length) {
           alert("Measurement mode: step must be non-zero");
           return false;
         }
 
         measurementIndex = 0;
-        setXYZValues(x, y, measurementSeries[measurementIndex]);
-        updateMeasurementStatus("Series prepared");
+        const startPoint = currentMeasurementPoint();
+        if (!startPoint) {
+          alert("Measurement mode: invalid start point");
+          return false;
+        }
+        setXYZValues(startPoint.x, startPoint.y, startPoint.z);
+        updateMeasurementStatus(`Series prepared (${axisLabel(axis)} sweep)`);
         return true;
       }
 
@@ -487,18 +553,23 @@
           return;
         }
         setXYZValues(point.x, point.y, point.z);
-        moveXYZ();
-        updateMeasurementStatus("Point sent");
+        if (moveXYZ()) {
+          updateMeasurementStatus("Point sent");
+        } else {
+          updateMeasurementStatus("Point not sent");
+        }
       }
 
       function nextMeasurementPoint() {
         if (!measurementSeries.length && !prepareMeasurementSeries()) return;
+        const axisUp = axisLabel(getMeasurementAxis());
         if (measurementIndex >= measurementSeries.length - 1) {
           updateMeasurementStatus("End of series");
-          alert("Measurement mode: end of Z series");
+          alert(`Measurement mode: end of ${axisUp} series`);
           return;
         }
 
+        const previousIndex = measurementIndex;
         measurementIndex += 1;
         const point = currentMeasurementPoint();
         if (!point) {
@@ -507,25 +578,51 @@
         }
 
         setXYZValues(point.x, point.y, point.z);
-        moveXYZ();
-        updateMeasurementStatus("Next point sent");
+        if (moveXYZ()) {
+          updateMeasurementStatus("Next point sent");
+        } else {
+          measurementIndex = previousIndex;
+          const previousPoint = currentMeasurementPoint();
+          if (previousPoint) setXYZValues(previousPoint.x, previousPoint.y, previousPoint.z);
+          updateMeasurementStatus("Next point not sent");
+        }
       }
 
       function applyPresetXY() {
         const xEl = document.getElementById("meas_x");
         const yEl = document.getElementById("meas_y");
+        const zEl = document.getElementById("meas_z");
         if (xEl) xEl.value = 100;
         if (yEl) yEl.value = 0;
+        if (zEl) zEl.value = getMeasurementAxis() === "x" ? MEAS_X_FIXED_Z : 100;
         invalidateMeasurementSeries();
       }
 
       function applyPresetZSeries() {
-        const startEl = document.getElementById("meas_z_start");
-        const stopEl = document.getElementById("meas_z_stop");
-        const stepEl = document.getElementById("meas_z_step");
+        const axisEl = document.getElementById("meas_axis");
+        const startEl = document.getElementById("meas_start");
+        const stopEl = document.getElementById("meas_stop");
+        const stepEl = document.getElementById("meas_step");
+        if (axisEl) axisEl.value = "z";
         if (startEl) startEl.value = 60;
         if (stopEl) stopEl.value = 110;
         if (stepEl) stepEl.value = 10;
+        updateMeasurementAxisUI();
+        invalidateMeasurementSeries();
+      }
+
+      function applyPresetXSeries() {
+        const axisEl = document.getElementById("meas_axis");
+        const zEl = document.getElementById("meas_z");
+        const startEl = document.getElementById("meas_start");
+        const stopEl = document.getElementById("meas_stop");
+        const stepEl = document.getElementById("meas_step");
+        if (axisEl) axisEl.value = "x";
+        if (zEl) zEl.value = MEAS_X_FIXED_Z;
+        if (startEl) startEl.value = 60;
+        if (stopEl) stopEl.value = 140;
+        if (stepEl) stepEl.value = 10;
+        updateMeasurementAxisUI();
         invalidateMeasurementSeries();
       }
 
@@ -563,7 +660,7 @@
       function moveXYZ() {
         if (!ws || ws.readyState !== 1) {
           alert("WebSocket not connected.");
-          return;
+          return false;
         }
 
         const x = Number(document.getElementById("x")?.value);
@@ -573,13 +670,14 @@
 
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
           alert("Please enter valid numbers");
-          return;
+          return false;
         }
 
         setPitchDeg(pitch);
         ws.send(JSON.stringify({ cmd: "move_xyz", x: x, y: y, z: z, pitch: pitch }));
         setLastMoveCommand(x, y, z, pitch);
         updateJogReadouts();
+        return true;
       }
 
       function sendGcodeLine() {
@@ -773,12 +871,18 @@
           el.addEventListener("change", updateJogReadouts);
         });
 
-        ["meas_x", "meas_y", "meas_z_start", "meas_z_stop", "meas_z_step"].forEach((id) => {
+        ["meas_x", "meas_y", "meas_z", "meas_start", "meas_stop", "meas_step", "meas_axis"].forEach((id) => {
           const el = document.getElementById(id);
           if (!el) return;
           el.addEventListener("input", invalidateMeasurementSeries);
           el.addEventListener("change", invalidateMeasurementSeries);
         });
+
+        const axisEl = document.getElementById("meas_axis");
+        if (axisEl) {
+          axisEl.addEventListener("input", updateMeasurementAxisUI);
+          axisEl.addEventListener("change", updateMeasurementAxisUI);
+        }
       }
 
       function boot() {
@@ -804,6 +908,7 @@
         }
 
         installMoveTools();
+        updateMeasurementAxisUI();
         updateJogReadouts();
         updateMeasurementStatus("Series not prepared");
 
@@ -872,7 +977,7 @@
       <div class="container">
         <h1>Move to XYZ</h1>
 
-        <div class="container">
+        <div class="tool-panel">
           <div class="form-group">
             <label for="x">X [mm]:</label>
             <input type="number" id="x" step="1" value="100" />
@@ -902,13 +1007,115 @@
             </div>
           </div>
 
-          <div style="display: flex; gap: 10px; flex-wrap: wrap">
+          <div class="button-row">
             <button onclick="moveXYZ()">Move</button>
             <button onclick="goHome()" style="background: #22c55e">HOME</button>
           </div>
         </div>
 
-        <div class="container">
+        <div class="tool-panel">
+          <h2>Jog XYZ</h2>
+
+          <div class="jog-row">
+            <span class="jog-axis">X</span>
+            <button class="jog-btn" onclick="jogAxis('x', -10)">-10</button>
+            <button class="jog-btn" onclick="jogAxis('x', -1)">-1</button>
+            <span class="jog-value" id="jog-x-value">100</span>
+            <button class="jog-btn" onclick="jogAxis('x', 1)">+1</button>
+            <button class="jog-btn" onclick="jogAxis('x', 10)">+10</button>
+          </div>
+
+          <div class="jog-row">
+            <span class="jog-axis">Y</span>
+            <button class="jog-btn" onclick="jogAxis('y', -10)">-10</button>
+            <button class="jog-btn" onclick="jogAxis('y', -1)">-1</button>
+            <span class="jog-value" id="jog-y-value">50</span>
+            <button class="jog-btn" onclick="jogAxis('y', 1)">+1</button>
+            <button class="jog-btn" onclick="jogAxis('y', 10)">+10</button>
+          </div>
+
+          <div class="jog-row">
+            <span class="jog-axis">Z</span>
+            <button class="jog-btn" onclick="jogAxis('z', -10)">-10</button>
+            <button class="jog-btn" onclick="jogAxis('z', -1)">-1</button>
+            <span class="jog-value" id="jog-z-value">100</span>
+            <button class="jog-btn" onclick="jogAxis('z', 1)">+1</button>
+            <button class="jog-btn" onclick="jogAxis('z', 10)">+10</button>
+          </div>
+
+          <label class="inline-check">
+            <input type="checkbox" id="jog_auto_send" checked />
+            Auto send move after jog
+          </label>
+        </div>
+
+        <div class="tool-panel">
+          <h2>Measurement Mode</h2>
+
+          <div class="measurement-grid">
+            <div class="form-group">
+              <label for="meas_axis">Sweep axis</label>
+              <select id="meas_axis">
+                <option value="z" selected>Z</option>
+                <option value="x">X</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="meas_x">X fixed [mm]</label>
+              <input type="number" id="meas_x" step="1" value="100" />
+            </div>
+            <div class="form-group">
+              <label for="meas_y">Y fixed [mm]</label>
+              <input type="number" id="meas_y" step="1" value="0" />
+            </div>
+            <div class="form-group">
+              <label id="meas_axis_value_label" for="meas_z">Z value [mm]</label>
+              <input type="number" id="meas_z" step="1" value="100" />
+            </div>
+            <div class="form-group">
+              <label id="meas_sweep_start_label" for="meas_start">Z start [mm]</label>
+              <input type="number" id="meas_start" step="1" value="60" />
+            </div>
+            <div class="form-group">
+              <label id="meas_sweep_stop_label" for="meas_stop">Z stop [mm]</label>
+              <input type="number" id="meas_stop" step="1" value="110" />
+            </div>
+            <div class="form-group">
+              <label id="meas_sweep_step_label" for="meas_step">Z step [mm]</label>
+              <input type="number" id="meas_step" step="1" value="10" />
+            </div>
+          </div>
+
+          <div class="button-row">
+            <button style="width: auto" onclick="applyPresetXY()">Preset X=100 Y=0</button>
+            <button style="width: auto" onclick="applyPresetZSeries()">Preset Z 60->110</button>
+            <button style="width: auto" onclick="applyPresetXSeries()">Preset X 60->140</button>
+            <button style="width: auto" onclick="applyMeasurementPreset()">Preset All</button>
+          </div>
+
+          <div class="button-row">
+            <button style="width: auto" onclick="prepareMeasurementSeries()">Prepare series</button>
+            <button style="width: auto" onclick="loadMeasurementStart()">Load start point</button>
+            <button style="width: auto" onclick="sendMeasurementPoint()">Send point</button>
+            <button style="width: auto; background: #22c55e" onclick="nextMeasurementPoint()">Next point</button>
+          </div>
+
+          <div class="measurement-status" id="measurement-status">Series not prepared</div>
+          <div class="measurement-preview">
+            <span class="small-label">Series:</span>
+            <code id="measurement-preview">-</code>
+          </div>
+        </div>
+
+        <div class="tool-panel">
+          <h2>Last Move Command</h2>
+          <div class="last-command-row">
+            <code id="last-command-text">-</code>
+            <button style="width: auto" onclick="copyLastCommand()">Copy last command</button>
+          </div>
+        </div>
+
+        <div class="tool-panel">
           <h2>Manual G-Code</h2>
           <div class="form-group" style="display: flex; gap: 10px">
             <input

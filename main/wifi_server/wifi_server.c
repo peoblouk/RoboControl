@@ -141,9 +141,21 @@ static esp_err_t wifi_config_handler(httpd_req_t *req) {
 // ===============================
 static void ws_clients_add(int fd) {
     xSemaphoreTake(g_ws_lock, portMAX_DELAY);
-    for (int i = 0; i < WS_MAX_CLIENTS; i++)
-        if (g_ws_clients[i] < 0) { g_ws_clients[i] = fd; break; }
+    for (int i = 0; i < WS_MAX_CLIENTS; i++) {
+        if (g_ws_clients[i] == fd) {
+            xSemaphoreGive(g_ws_lock);
+            return;
+        }
+    }
+    for (int i = 0; i < WS_MAX_CLIENTS; i++) {
+        if (g_ws_clients[i] < 0) {
+            g_ws_clients[i] = fd;
+            xSemaphoreGive(g_ws_lock);
+            return;
+        }
+    }
     xSemaphoreGive(g_ws_lock);
+    ESP_LOGW(TAG, "WS client list full, dropping fd=%d", fd);
 }
 
 static void ws_clients_remove(int fd) {
@@ -153,21 +165,39 @@ static void ws_clients_remove(int fd) {
     xSemaphoreGive(g_ws_lock);
 }
 
-static void ws_send_to(int fd, const char *msg) {
-    if (!g_httpd) return;
+static esp_err_t ws_send_to(int fd, const char *msg) {
+    if (!g_httpd || fd < 0 || !msg) return ESP_ERR_INVALID_ARG;
+
+    if (httpd_ws_get_fd_info(g_httpd, fd) != HTTPD_WS_CLIENT_WEBSOCKET) {
+        ws_clients_remove(fd);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     httpd_ws_frame_t frame = {
         .type = HTTPD_WS_TYPE_TEXT,
         .payload = (uint8_t*)msg,
         .len = strlen(msg)
     };
-    httpd_ws_send_frame_async(g_httpd, fd, &frame);
+    esp_err_t err = httpd_ws_send_frame_async(g_httpd, fd, &frame);
+    if (err != ESP_OK) {
+        ws_clients_remove(fd);
+    }
+    return err;
 }
 
 static void ws_broadcast(const char *msg) {
+    int clients[WS_MAX_CLIENTS];
+    int n = 0;
+
     xSemaphoreTake(g_ws_lock, portMAX_DELAY);
-    for (int i = 0; i < WS_MAX_CLIENTS; i++)
-        if (g_ws_clients[i] >= 0) ws_send_to(g_ws_clients[i], msg);
+    for (int i = 0; i < WS_MAX_CLIENTS; i++) {
+        if (g_ws_clients[i] >= 0) clients[n++] = g_ws_clients[i];
+    }
     xSemaphoreGive(g_ws_lock);
+
+    for (int i = 0; i < n; i++) {
+        ws_send_to(clients[i], msg);
+    }
 }
 
 static inline const char *robot_state_str_(void) {
@@ -179,8 +209,9 @@ static inline const char *robot_state_str_(void) {
 }
 
 static esp_err_t ws_handler(httpd_req_t *req) {
+    int fd = httpd_req_to_sockfd(req);
+
     if (req->method == HTTP_GET) {
-        int fd = httpd_req_to_sockfd(req);
         ws_clients_add(fd);
         ws_send_to(fd, "{\"status\":\"connected\"}");
         return ESP_OK;
@@ -190,18 +221,29 @@ static esp_err_t ws_handler(httpd_req_t *req) {
     frame.type = HTTPD_WS_TYPE_TEXT;
 
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
-    if (ret != ESP_OK || frame.len == 0) return ESP_FAIL;
+    if (ret != ESP_OK) {
+        ws_clients_remove(fd);
+        return ret;
+    }
 
     if (frame.type == HTTPD_WS_TYPE_CLOSE) {
-        int fd = httpd_req_to_sockfd(req);
         ws_clients_remove(fd);
+        return ESP_OK;
+    }
+
+    if (frame.type != HTTPD_WS_TYPE_TEXT || frame.len == 0) {
         return ESP_OK;
     }
 
     frame.payload = malloc(frame.len + 1);
     if (!frame.payload) return ESP_ERR_NO_MEM;
 
-    httpd_ws_recv_frame(req, &frame, frame.len);
+    ret = httpd_ws_recv_frame(req, &frame, frame.len);
+    if (ret != ESP_OK) {
+        free(frame.payload);
+        ws_clients_remove(fd);
+        return ret;
+    }
     frame.payload[frame.len] = '\0';
 
     cJSON *json = cJSON_Parse((char*)frame.payload);
