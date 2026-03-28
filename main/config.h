@@ -22,6 +22,13 @@
 #define CAN_TX_QUEUE_LEN        16
 #define CAN_RX_QUEUE_LEN        16
 #define CAN_NO_ACK_MODE         1
+#define CAN_PROTOCOL_VERSION    1
+#define CAN_PROGRAM_SLOT_COUNT  4
+#define CAN_SLOT_PATH_MAX       96
+#define CAN_CMD_ID_BASE         0x100U
+#define CAN_CMD_ID_BROADCAST    0x17FU
+#define CAN_RESP_ID_BASE        0x180U
+#define CAN_STATUS_ID_BASE      0x700U
 
 // Filepaths
 #define FS_DATA_BASE        "/spiffs/data"
@@ -180,6 +187,7 @@
 
 // kompatibilita se starým kódem pro budoucí TCP
 #define L_TOOL L_TOOL_OPEN
+#define ROBOT_TCP_IK_TOOL_LEN_MM 0.0f
 
 // ===============================
 // ROBOT: JOINT LIMITS (deg / deg/s)
@@ -297,7 +305,7 @@
 #define HOME_J0 75
 #define HOME_J1 80
 #define HOME_J2 30
-#define HOME_J3 0 //120 
+#define HOME_J3 120 
 #define HOME_J4 90
 #define HOME_J5 90
 #define HOME_J6 90

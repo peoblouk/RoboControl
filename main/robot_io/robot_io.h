@@ -104,13 +104,22 @@ typedef struct {
     robot_pose_t tcp_target_base;
 } traj_seg_t;
 
-// ===============================
-// GCODE TASK PARAMS
-// ===============================
-typedef struct {
-    char filename[64];
-} gcode_task_params_t;
+typedef enum {
+    ROBOT_STATE_DISARMED = 0,
+    ROBOT_STATE_UNREFERENCED = 1,
+    ROBOT_STATE_READY = 2,
+    ROBOT_STATE_RUNNING = 3,
+    ROBOT_STATE_READY_FOR_SYNC = 4,
+    ROBOT_STATE_ERROR = 5,
+} robot_system_state_t;
 
+typedef enum {
+    ROBOT_ERROR_NONE = 0,
+    ROBOT_ERROR_HOME = 1,
+    ROBOT_ERROR_GCODE = 2,
+    ROBOT_ERROR_SYNC = 3,
+    ROBOT_ERROR_STORAGE = 4,
+} robot_error_t;
 
 // ===============================
 // FUNCTION PROTOTYPES
@@ -176,13 +185,22 @@ bool robot_cmd_move_joints_home(const float q_target[SERVO_COUNT],
 bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg);
 bool robot_cmd_move_xyz_work(float x, float y, float z, float pitch_deg);
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout);
+bool robot_cmd_home_reference(void);
 void robot_cmd_queue_flush(void);
-void robot_core_run_gcode(const char *filename);
+bool robot_core_run_gcode(const char *filename);
+void robot_stop_all(void);
 
 void robot_disarm(void);
 void robot_arm(void);
 bool robot_is_armed(void);
 bool robot_is_operating(void);
+bool robot_is_program_running(void);
+void robot_set_sync_ready(bool ready);
+bool robot_is_sync_ready(void);
+robot_system_state_t robot_get_system_state(void);
+const char *robot_get_system_state_name(void);
+robot_error_t robot_get_last_error(void);
+void robot_clear_error(void);
 
 bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SERVO_COUNT]);
 

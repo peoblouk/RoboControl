@@ -31,7 +31,7 @@ void app_main(void)
 
     wifi_server_start();       // Start HTTP Server
     robot_control_start();     // Start robot control task
-    //can_start();               // Start CAN/TWAI task   
+    can_start();               // Start CAN/TWAI task
     status_led_start();        // Start status LED task
     cmd_control_start();       // Start command control task
 }

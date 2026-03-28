@@ -8,155 +8,7 @@
     <link rel="stylesheet" href="web/style.css" />
     <link rel="icon" href="web/robocontrol.ico" type="image/x-icon" />
 
-    <script>
-      let ws = null;
-
-      function wsUrl() {
-        const proto = location.protocol === "https:" ? "wss" : "ws";
-        return `${proto}://${location.host}/ws`;
-      }
-
-      function setWifiUI(online) {
-        const dot = document.getElementById("wifi-dot");
-        const txt = document.getElementById("wifi-state");
-        if (!dot || !txt) return;
-        dot.style.background = online ? "#22c55e" : "#ef4444";
-        txt.textContent = online ? "Connected" : "Disconnected";
-      }
-
-      function setRobotUI(state) {
-        const elText = document.getElementById("robot-state");
-        const elDot = document.getElementById("robot-dot");
-        if (!elText || !elDot) return;
-
-        elText.textContent = state || "Unknown";
-
-        if (state === "OPERATING" || state === "RUNNING") elDot.style.background = "#22c55e";
-        else if (state === "IDLE") elDot.style.background = "#fbbf24";
-        else if (state === "UNREFERENCED" || state === "POSE_UNKNOWN") elDot.style.background = "#f59e0b";
-        else if (state === "DISARMED") elDot.style.background = "#ef4444";
-        else if (state === "ALARM" || state === "ERROR" || state === "STOPPED") elDot.style.background = "#ef4444";
-        else elDot.style.background = "#888";
-      }
-
-      function initWS() {
-        try {
-          ws = new WebSocket(wsUrl());
-
-          ws.onopen = () => {
-            setWifiUI(true);
-            ws.send(JSON.stringify({ cmd: "sensors" }));
-          };
-
-          ws.onmessage = (event) => {
-            let data;
-            try {
-              data = JSON.parse(event.data);
-            } catch (_) {
-              return;
-            }
-            if (data.state) setRobotUI(data.state);
-          };
-
-          ws.onclose = () => {
-            setWifiUI(false);
-            setRobotUI("Offline");
-            setTimeout(initWS, 2000);
-          };
-
-          ws.onerror = () => {
-            setWifiUI(false);
-          };
-        } catch (_) {
-          setWifiUI(false);
-        }
-      }
-
-      function stopRobot() {
-        if (!ws || ws.readyState !== 1) {
-          alert("WebSocket not connected.");
-          return;
-        }
-        ws.send(JSON.stringify({ cmd: "gcode_stop" }));
-        setRobotUI("STOPPED");
-      }
-
-      function saveWiFi() {
-        const ssid = document.getElementById("ssid")?.value?.trim();
-        const pass = document.getElementById("pass")?.value?.trim();
-        if (!ssid || !pass) {
-          alert("SSID and password must be filled!");
-          return;
-        }
-
-        fetch("/wifi_config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ssid: ssid, password: pass }),
-        })
-          .then((r) => r.text())
-          .then(() => alert("WiFi settings sent! A restart of the AP will be needed."))
-          .catch((err) => alert("Error: " + err));
-      }
-
-      function resetWiFi() {
-        if (!confirm("Do you really want to reset WiFi settings?")) return;
-
-        fetch("/wifi_reset", { method: "POST" })
-          .then((r) => r.text())
-          .then(() => alert("WiFi settings reset. ESP32 will restart."))
-          .catch((err) => alert("Error: " + err));
-      }
-
-      // ---------------------------
-      // Limits table
-      // ---------------------------
-      async function loadLimits() {
-        const body = document.getElementById("limitsTableBody");
-        if (!body) return;
-
-        body.innerHTML = `<tr><td colspan="5">Loading...</td></tr>`;
-
-        try {
-          const r = await fetch("/api/limits");
-          if (!r.ok) throw new Error("GET /api/limits failed (HTTP " + r.status + ")");
-          const data = await r.json();
-
-          if (!data || !Array.isArray(data.joints) || data.joints.length < 1) {
-            throw new Error("Bad limits JSON");
-          }
-
-          body.innerHTML = "";
-
-          data.joints.forEach((j, idx) => {
-            const name = j.name ?? `J${j.id ?? idx}`;
-            const id = j.id ?? idx;
-            const min = j.min ?? "";
-            const max = j.max ?? "";
-            const speed = j.speed ?? j.v ?? "";
-
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
-              <td>${name}</td>
-              <td>${id}</td>
-              <td>${min}</td>
-              <td>${max}</td>
-              <td>${speed}</td>
-            `;
-            body.appendChild(tr);
-          });
-        } catch (e) {
-          body.innerHTML = `<tr><td colspan="5">Error: ${String(e.message || e)}</td></tr>`;
-        }
-      }
-
-      document.addEventListener("DOMContentLoaded", () => {
-        setWifiUI(false);
-        setRobotUI("Unknown");
-        initWS();
-        loadLimits();
-      });
-    </script>
+    <script src="web/app.js" defer></script>
   </head>
 
   <body>
@@ -197,42 +49,48 @@
       </div>
     </div>
 
-    <div class="container">
-      <h1>WiFi Settings</h1>
+    <div class="main-container">
+      <div class="column">
+        <div class="container">
+          <h1>WiFi Settings</h1>
 
-      <div class="form-group">
-        <label for="ssid">SSID</label>
-        <input type="text" id="ssid" placeholder="Enter SSID" />
+          <div class="form-group">
+            <label for="ssid">SSID</label>
+            <input type="text" id="ssid" placeholder="Enter SSID" />
+          </div>
+
+          <div class="form-group">
+            <label for="pass">Password</label>
+            <input type="password" id="pass" placeholder="Enter Password" />
+          </div>
+
+          <button onclick="saveWiFi()">Save WiFi</button>
+          <button onclick="resetWiFi()">! Reset WiFi !</button>
+        </div>
       </div>
 
-      <div class="form-group">
-        <label for="pass">Password</label>
-        <input type="password" id="pass" placeholder="Enter Password" />
-      </div>
+      <div class="column">
+        <div class="container">
+          <h2>Robot - Joint limits</h2>
+          <p class="small">(values from <code>config.h</code> in firmware).</p>
 
-      <button onclick="saveWiFi()">Save WiFi</button>
-      <button onclick="resetWiFi()">! Reset WiFi !</button>
-
-      <div class="card">
-        <h2>Robot – Joint limits</h2>
-        <p class="small">(values from <code>config.h</code> in firmware).</p>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Joint</th>
-              <th>ID</th>
-              <th>Min (deg)</th>
-              <th>Max (deg)</th>
-              <th>Speed (deg/s)</th>
-            </tr>
-          </thead>
-          <tbody id="limitsTableBody">
-            <tr>
-              <td colspan="5">Loading...</td>
-            </tr>
-          </tbody>
-        </table>
+          <table>
+            <thead>
+              <tr>
+                <th>Joint</th>
+                <th>ID</th>
+                <th>Min (deg)</th>
+                <th>Max (deg)</th>
+                <th>Speed (deg/s)</th>
+              </tr>
+            </thead>
+            <tbody id="limitsTableBody">
+              <tr>
+                <td colspan="5">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 

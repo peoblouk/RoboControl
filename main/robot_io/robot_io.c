@@ -15,6 +15,10 @@ static adc_oneshot_unit_handle_t s_adc2 = NULL;
 
 #define SERVO_DUTY_MAX ((1U << 14) - 1)   // timer is LEDC_TIMER_14_BIT
 
+typedef struct {
+    char filename[64];
+} gcode_task_params_t;
+
 static const int s_joint_master_servo[JOINT_COUNT] = {
     JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
 };
@@ -57,12 +61,15 @@ static portMUX_TYPE s_state_mux = portMUX_INITIALIZER_UNLOCKED;
 static QueueHandle_t s_robot_queue = NULL;
 static traj_seg_t s_seg_buf[SEG_BUF_LEN];
 static int s_seg_w = 0, s_seg_r = 0;
-static traj_seg_t s_cur = {0};
+static traj_seg_t s_current_segment = {0};
 static float s_last_q[SERVO_COUNT] = {0};
 static volatile bool s_armed = false;
 static volatile bool s_operating = false;
 static volatile bool s_referenced = false;
-static volatile bool s_tcp_est_valid = false;
+static volatile bool s_tcp_estimate_is_valid = false;
+static volatile bool s_sync_ready = false;
+static volatile bool s_gcode_running = false;
+static volatile robot_error_t s_last_error = ROBOT_ERROR_NONE;
 static robot_pose_t s_tcp_est_base = {
     .x = ROBOT_HOME_X_BASE_DEFAULT,
     .y = ROBOT_HOME_Y_BASE_DEFAULT,
@@ -81,6 +88,17 @@ static inline float clampf(float v, float lo, float hi) {
     if (v < lo) return lo;
     if (v > hi) return hi;
     return v;
+}
+
+static inline float clamp_pitch_deg(float pitch_deg)
+{
+    if (!isfinite(pitch_deg)) pitch_deg = ROBOT_DEFAULT_PITCH_DEG;
+    return clampf(pitch_deg, -89.0f, 89.0f);
+}
+
+static inline float tcp_ik_pitch_rad(float pitch_deg, float sign)
+{
+    return DEG2RAD(sign * clamp_pitch_deg(pitch_deg));
 }
 
 static inline int servo_master(int servo_id) {
@@ -116,10 +134,85 @@ static inline void base_to_work_xyz(float xb, float yb, float zb, float *xw, flo
     if (zw) *zw = zb - s_work_offset_xyz[2];
 }
 
+static void robot_set_error_internal(robot_error_t err)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    s_last_error = err;
+    portEXIT_CRITICAL(&s_state_mux);
+}
+
+void robot_clear_error(void)
+{
+    robot_set_error_internal(ROBOT_ERROR_NONE);
+}
+
+robot_error_t robot_get_last_error(void)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    robot_error_t err = s_last_error;
+    portEXIT_CRITICAL(&s_state_mux);
+    return err;
+}
+
+void robot_set_sync_ready(bool ready)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    s_sync_ready = ready;
+    portEXIT_CRITICAL(&s_state_mux);
+}
+
+bool robot_is_sync_ready(void)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    bool ready = s_sync_ready;
+    portEXIT_CRITICAL(&s_state_mux);
+    return ready;
+}
+
+bool robot_is_program_running(void)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    bool running = s_gcode_running;
+    portEXIT_CRITICAL(&s_state_mux);
+    return running;
+}
+
+robot_system_state_t robot_get_system_state(void)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    const bool armed = s_armed;
+    const bool referenced = s_referenced;
+    const bool operating = s_operating;
+    const bool sync_ready = s_sync_ready;
+    const bool gcode_running = s_gcode_running;
+    const robot_error_t last_error = s_last_error;
+    portEXIT_CRITICAL(&s_state_mux);
+
+    if (!armed) return ROBOT_STATE_DISARMED;
+    if (last_error != ROBOT_ERROR_NONE) return ROBOT_STATE_ERROR;
+    if (sync_ready) return ROBOT_STATE_READY_FOR_SYNC;
+    if (operating || gcode_running) return ROBOT_STATE_RUNNING;
+    if (!referenced) return ROBOT_STATE_UNREFERENCED;
+    return ROBOT_STATE_READY;
+}
+
+const char *robot_get_system_state_name(void)
+{
+    switch (robot_get_system_state()) {
+        case ROBOT_STATE_DISARMED: return "DISARMED";
+        case ROBOT_STATE_UNREFERENCED: return "UNREFERENCED";
+        case ROBOT_STATE_READY: return "READY";
+        case ROBOT_STATE_RUNNING: return "RUNNING";
+        case ROBOT_STATE_READY_FOR_SYNC: return "READY_FOR_SYNC";
+        case ROBOT_STATE_ERROR: return "ERROR";
+        default: return "UNKNOWN";
+    }
+}
+
 static inline void robot_tcp_estimate_invalidate(void)
 {
     portENTER_CRITICAL(&s_state_mux);
-    s_tcp_est_valid = false;
+    s_tcp_estimate_is_valid = false;
     portEXIT_CRITICAL(&s_state_mux);
 }
 
@@ -130,7 +223,7 @@ static inline void robot_tcp_estimate_set_base(float x, float y, float z, float 
     s_tcp_est_base.y = y;
     s_tcp_est_base.z = z;
     s_tcp_est_base.pitch_deg = pitch_deg;
-    s_tcp_est_valid = true;
+    s_tcp_estimate_is_valid = true;
     portEXIT_CRITICAL(&s_state_mux);
 }
 
@@ -169,7 +262,7 @@ bool robot_is_referenced(void)
 bool robot_has_tcp_estimate(void)
 {
     portENTER_CRITICAL(&s_state_mux);
-    bool v = s_tcp_est_valid;
+    bool v = s_tcp_estimate_is_valid;
     portEXIT_CRITICAL(&s_state_mux);
     return v;
 }
@@ -178,7 +271,8 @@ void robot_clear_reference(void)
 {
     portENTER_CRITICAL(&s_state_mux);
     s_referenced = false;
-    s_tcp_est_valid = false;
+    s_tcp_estimate_is_valid = false;
+    s_sync_ready = false;
     portEXIT_CRITICAL(&s_state_mux);
 }
 
@@ -186,7 +280,7 @@ bool robot_get_tcp_estimate_base(robot_pose_t *pose)
 {
     if (!pose) return false;
     portENTER_CRITICAL(&s_state_mux);
-    if (!s_tcp_est_valid) {
+    if (!s_tcp_estimate_is_valid) {
         portEXIT_CRITICAL(&s_state_mux);
         return false;
     }
@@ -199,7 +293,7 @@ bool robot_get_tcp_estimate_work(robot_pose_t *pose)
 {
     if (!pose) return false;
     portENTER_CRITICAL(&s_state_mux);
-    if (!s_tcp_est_valid) {
+    if (!s_tcp_estimate_is_valid) {
         portEXIT_CRITICAL(&s_state_mux);
         return false;
     }
@@ -447,7 +541,7 @@ int sensor_read_raw(int id)
 }
 
 // ===============================
-// SENSOR READ ANGLE (0-180°)
+// SENSOR READ ANGLE (0-180 deg)
 // ===============================
 float sensor_read_angle(int id)
 {
@@ -579,30 +673,25 @@ bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
 
 bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
 {
-    (void)pitch_deg;
-
-    // SIMPLE PLANAR IK FOR TUNING:
     const float r_j1 = planar_radius_from_j1(x, y);
-    const float z_sh = z - L0;
-    const float d = sqrtf(r_j1*r_j1 + z_sh*z_sh);
+    const float tool_len_cfg = ROBOT_TCP_IK_TOOL_LEN_MM;
+    const float tool_len = (isfinite(tool_len_cfg) && tool_len_cfg > 0.0f) ? tool_len_cfg : 0.0f;
+    const float pitch_signs[2] = { -1.0f, +1.0f };
 
-    if (d > (L1 + L2)) return false;
-    if (d < fabsf(L1 - L2)) return false;
-    return true;
+    for (int i = 0; i < 2; i++) {
+        const float phi = tcp_ik_pitch_rad(pitch_deg, pitch_signs[i]);
+        const float r_w = r_j1 - tool_len * cosf(phi);
+        const float z_w = z - tool_len * sinf(phi);
+        const float z_sh = z_w - L0;
+        const float d = sqrtf(r_w*r_w + z_sh*z_sh);
 
-    // FULL TCP REACHABILITY:
-    // float r = sqrtf(x*x + y*y);
-    // float phi = DEG2RAD(pitch_deg);
-    //
-    // float r_w  = r - L_TOOL * cosf(phi);
-    // float z_w  = z - L_TOOL * sinf(phi);
-    // float z_sh = z_w - L0;
-    //
-    // float d = sqrtf(r_w*r_w + z_sh*z_sh);
-    //
-    // if (d > (L1 + L2)) return false;
-    // if (d < fabsf(L1 - L2)) return false;
-    // return true;
+        if (!isfinite(d)) continue;
+        if (d > (L1 + L2)) continue;
+        if (d < fabsf(L1 - L2)) continue;
+        return true;
+    }
+
+    return false;
 }
 
 bool robot_tcp_reachable_work(float x, float y, float z, float pitch_deg)
@@ -635,8 +724,9 @@ float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_
 // ===============================
 // INVERSE KINEMATICS
 // ===============================
-static bool inverse_kinematics_simple(float x, float y, float z,
-                                      float q_target[SERVO_COUNT])
+static bool inverse_kinematics_tcp(float x, float y, float z,
+                                   float tool_pitch_deg,
+                                   float q_target[SERVO_COUNT])
 {
     float last_q[SERVO_COUNT];
     portENTER_CRITICAL(&s_state_mux);
@@ -644,167 +734,89 @@ static bool inverse_kinematics_simple(float x, float y, float z,
     portEXIT_CRITICAL(&s_state_mux);
 
     const float r_base = planar_radius_from_base(x, y);
-    const float r_j1   = planar_radius_from_j1(x, y);
+    const float r_j1 = planar_radius_from_j1(x, y);
 
-    // Base rotation from global x,y
     float q0;
     if (r_base < 1e-6f) {
-        float d0 = DIR[SERVO_J0];
+        const float d0 = DIR[SERVO_J0];
         q0 = (fabsf(d0) < 1e-6f) ? 0.0f
                                  : DEG2RAD((last_q[SERVO_J0] - OFF[SERVO_J0]) / d0);
     } else {
         q0 = atan2f(y, x);
     }
 
-    // Simple planar IK for point J3, geomeetry is solved from J1
-    const float z_sh = z - L0;
-    const float d2   = r_j1*r_j1 + z_sh*z_sh;
-    const float d    = sqrtf(d2);
+    const float tool_len_cfg = ROBOT_TCP_IK_TOOL_LEN_MM;
+    const float tool_len = (isfinite(tool_len_cfg) && tool_len_cfg > 0.0f) ? tool_len_cfg : 0.0f;
+    const float pitch_signs[2] = { -1.0f, +1.0f };
 
-    if (d > (L1 + L2)) return false;
-    if (d < fabsf(L1 - L2)) return false;
+    float best_q[SERVO_COUNT];
+    float best_cost = 1e30f;
+    bool best_ok = false;
 
-    float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f * L1 * L2);
-    if (cos_q2 >  1.0f) cos_q2 =  1.0f;
-    if (cos_q2 < -1.0f) cos_q2 = -1.0f;
+    for (int ps = 0; ps < 2; ps++) {
+        const float phi = tcp_ik_pitch_rad(tool_pitch_deg, pitch_signs[ps]);
+        const float r_w = r_j1 - tool_len * cosf(phi);
+        const float z_w = z - tool_len * sinf(phi);
+        const float z_sh = z_w - L0;
 
-    float phi = atan2f(z_sh, r_j1);
+        const float d2 = r_w*r_w + z_sh*z_sh;
+        const float d = sqrtf(d2);
 
-    float q2 = -acosf(cos_q2);
-    float psi = atan2f(L2 * sinf(q2), L1 + L2 * cosf(q2));
-    float q1 = phi - psi;
+        if (!isfinite(d)) continue;
+        if (d > (L1 + L2)) continue;
+        if (d < fabsf(L1 - L2)) continue;
 
-    float j0 = RAD2DEG(q0);
-    float j1 = RAD2DEG(q1);
-    float j2 = RAD2DEG(q2);
+        float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f * L1 * L2);
+        if (cos_q2 > 1.0f) cos_q2 = 1.0f;
+        if (cos_q2 < -1.0f) cos_q2 = -1.0f;
 
-    float cand[SERVO_COUNT];
-    for (int i = 0; i < SERVO_COUNT; i++) cand[i] = last_q[i];
+        const float q2_candidates[2] = { -acosf(cos_q2), +acosf(cos_q2) };
 
-    cand[SERVO_J0]   = map_servo(SERVO_J0,   j0);
-    cand[SERVO_J1_A] = map_servo(SERVO_J1_A, j1);
-    cand[SERVO_J2]   = map_servo(SERVO_J2,   j2);
+        for (int b = 0; b < 2; b++) {
+            const float q2 = q2_candidates[b];
+            const float phi2 = atan2f(z_sh, r_w);
+            const float psi = atan2f(L2 * sinf(q2), L1 + L2 * cosf(q2));
+            const float q1 = phi2 - psi;
+            const float q3_raw = phi - q1 - q2;
 
-    cand[SERVO_J3] = HOME_J3;
-    cand[SERVO_J4] = HOME_J4;
-    cand[SERVO_J5] = HOME_J5;
+            for (int k = -1; k <= 1; k++) {
+                const float q3 = q3_raw + (float)k * 2.0f * (float)M_PI;
 
-    ESP_LOGD(TAG,
-             "IK dbg j0=%.1f j1=%.1f j2=%.1f | cand s0=%.1f s1=%.1f s2=%.1f s3=%.1f s4=%.1f s5=%.1f s6=%.1f",
-             j0, j1, j2,
-             cand[0], cand[1], cand[2], cand[3], cand[4], cand[5], cand[6]);
+                const float j0 = RAD2DEG(q0);
+                const float j1 = RAD2DEG(q1);
+                const float j2 = RAD2DEG(q2);
+                const float j3 = RAD2DEG(q3);
 
-    float dbg[SERVO_COUNT];
-    for (int i = 0; i < SERVO_COUNT; i++) dbg[i] = cand[i];
+                float cand[SERVO_COUNT];
+                for (int i = 0; i < SERVO_COUNT; i++) cand[i] = last_q[i];
 
-    bool valid = robot_validate_and_prepare_q(dbg, false);
+                cand[SERVO_J0] = map_servo(SERVO_J0, j0);
+                cand[SERVO_J1_A] = map_servo(SERVO_J1_A, j1);
+                cand[SERVO_J2] = map_servo(SERVO_J2, j2);
+                cand[SERVO_J3] = map_servo(SERVO_J3, j3);
 
-    ESP_LOGD(TAG,
-             "IK dbg valid=%d | validated s0=%.1f s1=%.1f s2=%.1f s3=%.1f s4=%.1f s5=%.1f s6=%.1f",
-             (int)valid,
-             dbg[0], dbg[1], dbg[2], dbg[3], dbg[4], dbg[5], dbg[6]);
+                if (!robot_validate_and_prepare_q(cand, false)) continue;
 
-    if (!valid) return false;
+                float cost = 0.0f;
+                cost += fabsf(cand[SERVO_J0] - last_q[SERVO_J0]);
+                cost += fabsf(cand[SERVO_J1_A] - last_q[SERVO_J1_A]);
+                cost += fabsf(cand[SERVO_J2] - last_q[SERVO_J2]);
+                cost += fabsf(cand[SERVO_J3] - last_q[SERVO_J3]);
+                cost += (ps == 0) ? 0.0f : 0.01f;
 
-    for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = cand[i];
+                if (cost < best_cost) {
+                    best_cost = cost;
+                    for (int i = 0; i < SERVO_COUNT; i++) best_q[i] = cand[i];
+                    best_ok = true;
+                }
+            }
+        }
+    }
+
+    if (!best_ok) return false;
+    for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = best_q[i];
     return true;
 }
-
-// FULL TCP IK:
-// static bool inverse_kinematics_tcp(float x, float y, float z,
-//                                    float tool_pitch_deg,
-//                                    float q_target[SERVO_COUNT])
-// {
-//     const float r_base = planar_radius_from_base(x, y);
-//     const float r_j1   = r_base - J1_X_OFFSET;
-//
-//     // Base rotation
-//     float q0;
-//     if (r_base < 1e-6f) {
-//         float d0 = DIR[SERVO_J0];
-//         q0 = (fabsf(d0) < 1e-6f) ? 0.0f
-//                                  : DEG2RAD((s_last_q[SERVO_J0] - OFF[SERVO_J0]) / d0);
-//     } else {
-//         q0 = atan2f(y, x);
-//     }
-//
-//     if (!isfinite(tool_pitch_deg)) tool_pitch_deg = ROBOT_DEFAULT_PITCH_DEG;
-//     if (tool_pitch_deg >  89.0f) tool_pitch_deg =  89.0f;
-//     if (tool_pitch_deg < -89.0f) tool_pitch_deg = -89.0f;
-//
-//     const float phi = DEG2RAD(tool_pitch_deg);
-//
-//     // vyber si otevřený nebo zavřený gripper
-//     const float tool_len = L_TOOL_OPEN;   // nebo L_TOOL_CLOSED
-//
-//     // Wrist pitch pivot from TCP
-//     const float r_w  = r_j1 - tool_len * cosf(phi);
-//     const float z_w  = z    - tool_len * sinf(phi);
-//     const float z_sh = z_w - L0;
-//     const float z_w  = z - (float)L_TOOL * sinf(phi);
-//     const float z_sh = z_w - L0;
-
-//     const float d2 = r_w*r_w + z_sh*z_sh;
-//     const float d  = sqrtf(d2);
-
-//     if (d > (L1 + L2)) return false;
-//     if (d < fabsf(L1 - L2)) return false;
-
-//     float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f * L1 * L2);
-//     if (cos_q2 >  1.0f) cos_q2 =  1.0f;
-//     if (cos_q2 < -1.0f) cos_q2 = -1.0f;
-
-//     // Same elbow branch as the now-working simple IK
-//     const float q2  = -acosf(cos_q2);
-//     const float phi2 = atan2f(z_sh, r_w);
-//     const float psi  = atan2f(L2 * sinf(q2), L1 + L2 * cosf(q2));
-//     const float q1   = phi2 - psi;
-
-//     // Wrist pitch to match requested TCP pitch
-//     const float q3_raw = phi - q1 - q2;
-
-//     float best_q[SERVO_COUNT];
-//     float best_cost = 1e30f;
-//     bool  best_ok = false;
-
-//     // Try wrapped wrist solutions so servo limits can still be satisfied
-//     for (int k = -1; k <= 1; k++) {
-//         const float q3 = q3_raw + (float)k * 2.0f * (float)M_PI;
-
-//         const float j0 = RAD2DEG(q0);
-//         const float j1 = RAD2DEG(q1);
-//         const float j2 = RAD2DEG(q2);
-//         const float j3 = RAD2DEG(q3);
-
-//         float cand[SERVO_COUNT];
-//         for (int i = 0; i < SERVO_COUNT; i++) cand[i] = s_last_q[i];
-
-//         cand[SERVO_J0]   = map_servo(SERVO_J0,   j0);
-//         cand[SERVO_J1_A] = map_servo(SERVO_J1_A, j1);
-//         cand[SERVO_J2]   = map_servo(SERVO_J2,   j2);
-//         cand[SERVO_J3]   = map_servo(SERVO_J3,   j3);
-
-//         // J4/J5 nechávám tak jak jsou teď
-//         if (!robot_validate_and_prepare_q(cand, false)) continue;
-
-//         float cost = 0.0f;
-//         cost += fabsf(cand[SERVO_J0]   - s_last_q[SERVO_J0]);
-//         cost += fabsf(cand[SERVO_J1_A] - s_last_q[SERVO_J1_A]);
-//         cost += fabsf(cand[SERVO_J2]   - s_last_q[SERVO_J2]);
-//         cost += fabsf(cand[SERVO_J3]   - s_last_q[SERVO_J3]);
-
-//         if (cost < best_cost) {
-//             best_cost = cost;
-//             for (int i = 0; i < SERVO_COUNT; i++) best_q[i] = cand[i];
-//             best_ok = true;
-//         }
-//     }
-
-//     if (!best_ok) return false;
-
-//     for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = best_q[i];
-//     return true;
-// }
 
 // ===============================
 // SEGMENT BUFFER
@@ -814,7 +826,7 @@ static bool seg_empty(void) { return s_seg_w == s_seg_r; }
 
 static void seg_flush(void) {
     s_seg_w = s_seg_r = 0;
-    s_cur.active = false;
+    s_current_segment.active = false;
 }
 
 static bool seg_push(const traj_seg_t *s) {
@@ -856,6 +868,7 @@ static void robot_control_task(void *arg)
     
     seed_last_q_from_home();
     robot_clear_reference();
+    robot_clear_error();
 
     robot_cmd_t cmd;
     static bool disarmed_latched = false;
@@ -891,7 +904,7 @@ static void robot_control_task(void *arg)
 
             if (seg_full()) {
                 ESP_LOGW(TAG, "Planner full, dropping command");
-                s_operating = s_cur.active || !seg_empty();
+                s_operating = s_current_segment.active || !seg_empty();
                 continue;
             }
 
@@ -918,20 +931,15 @@ static void robot_control_task(void *arg)
             case ROBOT_CMD_MOVE_XYZ: {
                 for (int i = 0; i < SERVO_COUNT; i++) seg.q1[i] = seg.q0[i];
 
-                float pitch = cmd.pitch_deg;
-                if (!isfinite(pitch)) pitch = ROBOT_DEFAULT_PITCH_DEG;
-                if (pitch > 89.0f)  pitch = 89.0f;
-                if (pitch < -89.0f) pitch = -89.0f;
+                float pitch = clamp_pitch_deg(cmd.pitch_deg);
 
-                ESP_LOGD(TAG, "IK SIMPLE(base): x=%.1f y=%.1f z=%.1f (pitch %.1f ignored for now)",
+                ESP_LOGD(TAG, "IK TCP(base): x=%.1f y=%.1f z=%.1f pitch=%.1f",
                          cmd.x, cmd.y, cmd.z, pitch);
 
-                bool ok = inverse_kinematics_simple(cmd.x, cmd.y, cmd.z, seg.q1);
-                // Future TCP version
-                // bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
+                bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
                 if (!ok) {
-                    ESP_LOGW(TAG, "IK SIMPLE failed");
-                    s_operating = s_cur.active || !seg_empty();
+                    ESP_LOGW(TAG, "IK TCP failed");
+                    s_operating = s_current_segment.active || !seg_empty();
                     continue;
                 }
 
@@ -944,7 +952,6 @@ static void robot_control_task(void *arg)
                 seg.tcp_target_base.x = cmd.x;
                 seg.tcp_target_base.y = cmd.y;
                 seg.tcp_target_base.z = cmd.z;
-                // During simple planar IK tuning, pitch is not solved
                 seg.tcp_target_base.pitch_deg = pitch;
                 break;
             }
@@ -963,7 +970,7 @@ static void robot_control_task(void *arg)
 
             default:
                 ESP_LOGW(TAG, "Unknown robot command: %d", cmd.type);
-                s_operating = s_cur.active || !seg_empty();
+                s_operating = s_current_segment.active || !seg_empty();
                 continue;
             }
 
@@ -977,22 +984,22 @@ static void robot_control_task(void *arg)
             seg_push(&seg);
         }
 
-        if (!s_cur.active) {
-            if (!seg_pop(&s_cur)) {
+        if (!s_current_segment.active) {
+            if (!seg_pop(&s_current_segment)) {
                 s_operating = false;
                 continue;
             }
-            s_cur.t = 0;
-            s_cur.active = true;
+            s_current_segment.t = 0;
+            s_current_segment.active = true;
         }
 
-        s_cur.t += EXEC_DT_S;
-        float s = (s_cur.T > 1e-6f) ? (s_cur.t / s_cur.T) : 1.0f;
+        s_current_segment.t += EXEC_DT_S;
+        float s = (s_current_segment.T > 1e-6f) ? (s_current_segment.t / s_current_segment.T) : 1.0f;
         float a = smoothstep(s);
 
         float q[SERVO_COUNT];
         for (int i = 0; i < SERVO_COUNT; i++) {
-            q[i] = s_cur.q0[i] + (s_cur.q1[i] - s_cur.q0[i]) * a;
+            q[i] = s_current_segment.q0[i] + (s_current_segment.q1[i] - s_current_segment.q0[i]) * a;
         }
 
         robot_validate_and_prepare_q(q, true);
@@ -1000,29 +1007,31 @@ static void robot_control_task(void *arg)
 
         if (s >= 1.0f) {
             portENTER_CRITICAL(&s_state_mux);
-            for (int i = 0; i < SERVO_COUNT; i++) s_last_q[i] = s_cur.q1[i];
+            for (int i = 0; i < SERVO_COUNT; i++) s_last_q[i] = s_current_segment.q1[i];
             portEXIT_CRITICAL(&s_state_mux);
 
-            if (s_cur.tcp_target_valid) {
-                robot_tcp_estimate_set_base(s_cur.tcp_target_base.x,
-                                            s_cur.tcp_target_base.y,
-                                            s_cur.tcp_target_base.z,
-                                            s_cur.tcp_target_base.pitch_deg);
+            if (s_current_segment.tcp_target_valid) {
+                robot_tcp_estimate_set_base(s_current_segment.tcp_target_base.x,
+                                            s_current_segment.tcp_target_base.y,
+                                            s_current_segment.tcp_target_base.z,
+                                            s_current_segment.tcp_target_base.pitch_deg);
             } else {
                 robot_tcp_estimate_invalidate();
             }
 
-            if (s_cur.mark_referenced_on_finish) {
+            if (s_current_segment.mark_referenced_on_finish) {
                 portENTER_CRITICAL(&s_state_mux);
                 s_referenced = true;
                 portEXIT_CRITICAL(&s_state_mux);
+                robot_clear_error();
+                gcode_reset();
                 ESP_LOGI(TAG, "Robot reference established");
             }
 
-            s_cur.active = false;
+            s_current_segment.active = false;
         }
 
-        s_operating = s_cur.active || !seg_empty();
+        s_operating = s_current_segment.active || !seg_empty();
     }
 }
 
@@ -1036,11 +1045,35 @@ bool robot_is_operating(void)
     return s_operating;
 }
 
+void robot_stop_all(void)
+{
+    gcode_stop();
+}
+
+bool robot_cmd_home_reference(void)
+{
+    if (!s_armed || s_robot_queue == NULL) return false;
+
+    robot_stop_all();
+
+    bool ok = robot_cmd_move_joints_home(s_home_q_init,
+                                         ROBOT_HOME_X_BASE_DEFAULT,
+                                         ROBOT_HOME_Y_BASE_DEFAULT,
+                                         ROBOT_HOME_Z_BASE_DEFAULT,
+                                         ROBOT_HOME_PITCH_DEG_DEFAULT);
+    if (ok) {
+        robot_clear_error();
+    } else {
+        robot_set_error_internal(ROBOT_ERROR_HOME);
+    }
+    return ok;
+}
+
 void robot_disarm(void)
 {
     s_armed = false;
     s_operating = false;
-    robot_cmd_queue_flush();
+    robot_stop_all();
 
     for (int i = 0; i < SERVO_COUNT; i++) {
         ledc_stop(LEDC_LOW_SPEED_MODE, servos[i].channel, 0);
@@ -1049,6 +1082,8 @@ void robot_disarm(void)
 
 void robot_arm(void)
 {
+    robot_clear_error();
+    robot_set_sync_ready(false);
     s_armed = true;
 }
 
@@ -1076,7 +1111,9 @@ bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
     cmd.type = ROBOT_CMD_MOVE_JOINTS;
     for (int i = 0; i < SERVO_COUNT; i++) cmd.q_target[i] = q_target[i];
 
-    return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
+    bool queued = (xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE);
+    if (queued) robot_set_sync_ready(false);
+    return queued;
 }
 
 bool robot_cmd_move_joints_home(const float q_target[SERVO_COUNT],
@@ -1098,7 +1135,9 @@ bool robot_cmd_move_joints_home(const float q_target[SERVO_COUNT],
     cmd.z = home_z_base;
     cmd.pitch_deg = home_pitch_deg;
 
-    return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
+    bool queued = (xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE);
+    if (queued) robot_set_sync_ready(false);
+    return queued;
 }
 
 bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg)
@@ -1111,7 +1150,9 @@ bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg)
     cmd.x = x; cmd.y = y; cmd.z = z;
     cmd.pitch_deg = pitch_deg;
 
-    return xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE;
+    bool queued = (xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE);
+    if (queued) robot_set_sync_ready(false);
+    return queued;
 }
 
 bool robot_cmd_move_xyz_work(float x, float y, float z, float pitch_deg)
@@ -1136,7 +1177,9 @@ bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s
     for (int i = 0; i < SERVO_COUNT; i++) cmd.q_target[i] = q_target[i];
     cmd.duration_s = duration_s;
 
-    return xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE;
+    bool queued = (xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE);
+    if (queued) robot_set_sync_ready(false);
+    return queued;
 }
 
 void robot_cmd_queue_flush(void)
@@ -1146,6 +1189,7 @@ void robot_cmd_queue_flush(void)
     robot_cmd_t cmd = {0};
     cmd.type = ROBOT_CMD_QUEUE_FLUSH;
     (void)xQueueSend(s_robot_queue, &cmd, 0);
+    robot_set_sync_ready(false);
 }
 
 // ===============================
@@ -1158,41 +1202,51 @@ static void gcode_executor_task(void *arg)
     ESP_LOGI(TAG, "Starting G-Code task for file: %s", params->filename);
     bool res = gcode_run_file(params->filename);
 
-    if (res) ESP_LOGI(TAG, "G-Code finished successfully");
-    else     ESP_LOGE(TAG, "G-Code failed");
+    if (res) {
+        while (robot_is_operating()) {
+            vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
+        }
+        robot_clear_error();
+        ESP_LOGI(TAG, "G-Code finished successfully");
+    } else {
+        robot_set_error_internal(ROBOT_ERROR_GCODE);
+        ESP_LOGE(TAG, "G-Code failed");
+    }
 
     free(params);
+    portENTER_CRITICAL(&s_state_mux);
+    s_gcode_running = false;
+    portEXIT_CRITICAL(&s_state_mux);
     vTaskDelete(NULL);
 }
 
 bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SERVO_COUNT])
 {
-    portENTER_CRITICAL(&s_state_mux);
-    for (int i = 0; i < SERVO_COUNT; i++) q_target[i] = s_last_q[i];
-    portEXIT_CRITICAL(&s_state_mux);
-
-    (void)pitch_deg;
-
-    if (!inverse_kinematics_simple(x, y, z, q_target)) return false;
-    // Future TCP version
-    // if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
+    if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
 
     robot_validate_and_prepare_q(q_target, true);
     return true;
 }
 
-void robot_core_run_gcode(const char *filename)
+bool robot_core_run_gcode(const char *filename)
 {
-    if (!s_armed) return;
+    if (!s_armed) return false;
+    if (!filename || filename[0] == '\0') return false;
+    if (robot_is_program_running()) return false;
 
     gcode_task_params_t *params = malloc(sizeof(gcode_task_params_t));
     if (!params) {
         ESP_LOGE(TAG, "Failed to allocate memory for G-code task");
-        return;
+        return false;
     }
 
     strncpy(params->filename, filename, sizeof(params->filename) - 1);
     params->filename[sizeof(params->filename) - 1] = '\0';
+    robot_set_sync_ready(false);
+    robot_clear_error();
+    portENTER_CRITICAL(&s_state_mux);
+    s_gcode_running = true;
+    portEXIT_CRITICAL(&s_state_mux);
 
     BaseType_t res = xTaskCreatePinnedToCore(
         gcode_executor_task,
@@ -1206,6 +1260,12 @@ void robot_core_run_gcode(const char *filename)
 
     if (res != pdPASS) {
         ESP_LOGE(TAG, "Failed to create G-code task");
+        portENTER_CRITICAL(&s_state_mux);
+        s_gcode_running = false;
+        portEXIT_CRITICAL(&s_state_mux);
         free(params);
+        return false;
     }
+
+    return true;
 }
