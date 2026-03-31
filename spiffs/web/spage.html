@@ -1,4 +1,4 @@
-<!-- @format -->
+﻿<!-- @format -->
 <!doctype html>
 <html lang="en">
   <head>
@@ -59,6 +59,11 @@
           <div class="status-dot" id="wifi-dot" style="background: #ef4444"></div>
           <span id="wifi-state">Disconnected</span>
         </div>
+
+        <div class="status">
+          <span style="opacity: 0.7; font-size: 0.8em; margin-right: 5px">CAN ID:</span>
+          <span id="can-node-id">-</span>
+        </div>
       </div>
     </div>
 
@@ -74,11 +79,11 @@
             </div>
             <div class="form-group">
               <label for="y">Y [mm]:</label>
-              <input type="number" id="y" step="1" value="50" />
+              <input type="number" id="y" step="1" value="0" />
             </div>
             <div class="form-group">
               <label for="z">Z [mm]:</label>
-              <input type="number" id="z" step="1" value="100" />
+              <input type="number" id="z" step="1" value="50" />
             </div>
 
             <div class="form-group">
@@ -121,7 +126,7 @@
               <span class="jog-axis">Y</span>
               <button class="jog-btn" onclick="jogAxis('y', -10)">-10</button>
               <button class="jog-btn" onclick="jogAxis('y', -1)">-1</button>
-              <span class="jog-value" id="jog-y-value">50</span>
+              <span class="jog-value" id="jog-y-value">0</span>
               <button class="jog-btn" onclick="jogAxis('y', 1)">+1</button>
               <button class="jog-btn" onclick="jogAxis('y', 10)">+10</button>
             </div>
@@ -130,7 +135,7 @@
               <span class="jog-axis">Z</span>
               <button class="jog-btn" onclick="jogAxis('z', -10)">-10</button>
               <button class="jog-btn" onclick="jogAxis('z', -1)">-1</button>
-              <span class="jog-value" id="jog-z-value">100</span>
+              <span class="jog-value" id="jog-z-value">50</span>
               <button class="jog-btn" onclick="jogAxis('z', 1)">+1</button>
               <button class="jog-btn" onclick="jogAxis('z', 10)">+10</button>
             </div>
@@ -182,15 +187,8 @@
             </div>
 
             <div class="button-row">
-              <button style="width: auto" onclick="applyPresetXY()">Preset X=100 Y=0</button>
-              <button style="width: auto" onclick="applyPresetZSeries()">Preset Z 60->110</button>
-              <button style="width: auto" onclick="applyPresetXSeries()">Preset X 60->140</button>
-              <button style="width: auto" onclick="applyPresetYSeries()">Preset Y -20->20 (X=100 Z=50)</button>
-              <button style="width: auto" onclick="applyMeasurementPreset()">Preset All</button>
-            </div>
-
-            <div class="button-row">
               <button style="width: auto" onclick="prepareMeasurementSeries()">Prepare series</button>
+              <button style="width: auto" onclick="reverseMeasurementSeries()">Reverse series</button>
               <button style="width: auto" onclick="loadMeasurementStart()">Load start point</button>
               <button style="width: auto" onclick="sendMeasurementPoint()">Send point</button>
               <button style="width: auto; background: #22c55e" onclick="nextMeasurementPoint()">Next point</button>
@@ -230,11 +228,11 @@
             <div class="servo-control" id="servo-control-0">
               <label>
                 <span>J0 (NUM_35):</span>
-                <span class="joint-act" id="joint-act-0">--°</span>
+                <span class="joint-act" id="joint-act-0">--Â°</span>
               </label>
               <div class="joint-line">
                 <input type="range" value="90" id="joint-0" oninput="setJointUI(0)" />
-                <span class="joint-target" id="joint-value-0">90°</span>
+                <span class="joint-target" id="joint-value-0">90Â°</span>
                 <button onclick="setJoint(0)">Set</button>
               </div>
             </div>
@@ -242,11 +240,11 @@
             <div class="servo-control" id="servo-control-1">
               <label>
                 <span>J1 (NUM_36 + NUM_37):</span>
-                <span class="joint-act" id="joint-act-1">--°</span>
+                <span class="joint-act" id="joint-act-1">--Â°</span>
               </label>
               <div class="joint-line">
                 <input type="range" value="90" id="joint-1" oninput="setJointUI(1)" />
-                <span class="joint-target" id="joint-value-1">90°</span>
+                <span class="joint-target" id="joint-value-1">90Â°</span>
                 <button onclick="setJoint(1)">Set</button>
               </div>
             </div>
@@ -254,11 +252,11 @@
             <div class="servo-control" id="servo-control-2">
               <label>
                 <span>J2 (NUM_39):</span>
-                <span class="joint-act" id="joint-act-2">--°</span>
+                <span class="joint-act" id="joint-act-2">--Â°</span>
               </label>
               <div class="joint-line">
                 <input type="range" value="90" id="joint-2" oninput="setJointUI(2)" />
-                <span class="joint-target" id="joint-value-2">90°</span>
+                <span class="joint-target" id="joint-value-2">90Â°</span>
                 <button onclick="setJoint(2)">Set</button>
               </div>
             </div>
@@ -266,11 +264,11 @@
             <div class="servo-control" id="servo-control-3">
               <label>
                 <span>J3 (NUM_40):</span>
-                <span class="joint-act" id="joint-act-3">--°</span>
+                <span class="joint-act" id="joint-act-3">--Â°</span>
               </label>
               <div class="joint-line">
                 <input type="range" value="90" id="joint-3" oninput="setJointUI(3)" />
-                <span class="joint-target" id="joint-value-3">90°</span>
+                <span class="joint-target" id="joint-value-3">90Â°</span>
                 <button onclick="setJoint(3)">Set</button>
               </div>
             </div>
@@ -278,11 +276,11 @@
             <div class="servo-control" id="servo-control-4">
               <label>
                 <span>J4 (NUM_41):</span>
-                <span class="joint-act" id="joint-act-4">--°</span>
+                <span class="joint-act" id="joint-act-4">--Â°</span>
               </label>
               <div class="joint-line">
                 <input type="range" value="90" id="joint-4" oninput="setJointUI(4)" />
-                <span class="joint-target" id="joint-value-4">90°</span>
+                <span class="joint-target" id="joint-value-4">90Â°</span>
                 <button onclick="setJoint(4)">Set</button>
               </div>
             </div>
@@ -290,19 +288,16 @@
             <div class="servo-control" id="servo-control-5">
               <label>
                 <span>J5 (NUM_42) Gripper:</span>
-                <span class="joint-act" id="joint-act-5">--°</span>
+                <span class="joint-act" id="joint-act-5">--Â°</span>
               </label>
               <div class="joint-line">
                 <input type="range" value="45" id="joint-5" oninput="setJointUI(5)" />
-                <span class="joint-target" id="joint-value-5">45°</span>
+                <span class="joint-target" id="joint-value-5">45Â°</span>
                 <button onclick="setJoint(5)">Set</button>
               </div>
             </div>
           </div>
         </div>
-      </div>
-
-      <div class="column">
         <div class="container">
           <h2>Joint Angles</h2>
           <div class="gauges">
@@ -314,9 +309,7 @@
             <div class="gauge" data-id="5"></div>
           </div>
         </div>
-      </div>
 
-      <div class="column">
         <div class="container">
           <h2>Files (.txt, .gcode)</h2>
 
@@ -329,7 +322,7 @@
             <table style="width: 100%; border-collapse: collapse">
               <thead>
                 <tr>
-                  <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 40px">☐</th>
+                  <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 40px"></th>
                   <th style="border-bottom: 1px solid #fff; padding: 6px 8px">Name</th>
                   <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 100px">Size</th>
                   <th style="border-bottom: 1px solid #fff; padding: 6px 8px; width: 80px">Run</th>
@@ -338,7 +331,7 @@
               </thead>
               <tbody id="files-body">
                 <tr>
-                  <td colspan="5" style="padding: 8px">Loading…</td>
+                  <td colspan="5" style="padding: 8px">Loadingâ€¦</td>
                 </tr>
               </tbody>
             </table>
@@ -351,10 +344,10 @@
           <h2>WiFi Configuration</h2>
           <button onclick="window.location.href = '/settings'">WiFi Configuration</button>
         </div>
+      </div>
 
-        <div class="footer">
-          <p>RoboControl Petr Oblouk © 2025</p>
-        </div>
+      <div class="footer">
+        <p>RoboControl | Petr Oblouk | 2026</p>
       </div>
     </div>
   </body>

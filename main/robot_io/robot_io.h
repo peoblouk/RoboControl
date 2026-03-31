@@ -16,6 +16,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 // Radians / Degrees conversion
 #define RAD2DEG(x) ((x) * 180.0f / M_PI)
@@ -66,7 +67,9 @@ typedef struct {
     adc_channel_t channel;
 } sensor_t;
 
+#if SENSOR_COUNT > 0
 extern sensor_t sensors[SENSOR_COUNT];
+#endif
 
 // ===============================
 // JOINT LIMITS
@@ -100,6 +103,7 @@ typedef struct {
     bool  active;
 
     bool  tcp_target_valid;
+    bool  preserve_tcp_estimate;
     bool  mark_referenced_on_finish;
     robot_pose_t tcp_target_base;
 } traj_seg_t;
@@ -157,6 +161,8 @@ typedef enum {
     ROBOT_CMD_MOVE_JOINTS,
     ROBOT_CMD_MOVE_XYZ,
     ROBOT_CMD_MOVE_JOINTS_T,
+    ROBOT_CMD_DWELL,
+    ROBOT_CMD_GRIPPER,
     ROBOT_CMD_QUEUE_FLUSH
 } robot_cmd_type_t;
 
@@ -167,6 +173,8 @@ typedef struct {
     float x, y, z;
     float pitch_deg;
     float duration_s;
+    uint32_t dwell_ms;
+    float gripper_deg;
 
     bool mark_referenced_on_finish;
     bool tcp_target_valid;
@@ -183,8 +191,12 @@ bool robot_cmd_move_joints_home(const float q_target[SERVO_COUNT],
                                 float home_z_base,
                                 float home_pitch_deg);
 bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg);
+bool robot_cmd_move_xyz_t(float x, float y, float z, float pitch_deg, float duration_s, TickType_t timeout);
 bool robot_cmd_move_xyz_work(float x, float y, float z, float pitch_deg);
+bool robot_cmd_move_xyz_work_t(float x, float y, float z, float pitch_deg, float duration_s, TickType_t timeout);
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout);
+bool robot_cmd_dwell_ms(uint32_t dwell_ms, TickType_t timeout);
+bool robot_cmd_gripper_set(float gripper_deg, TickType_t timeout);
 bool robot_cmd_home_reference(void);
 void robot_cmd_queue_flush(void);
 bool robot_core_run_gcode(const char *filename);

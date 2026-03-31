@@ -66,10 +66,9 @@ body {
   max-width: 1700px;
   margin: 0 auto;
   padding: 16px;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr;
   align-items: flex-start;
-  justify-content: center;
   gap: 16px;
 }
 
@@ -77,15 +76,22 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  flex: 1 1 360px;
-  min-width: 320px;
-  max-width: 560px;
+  min-width: 0;
+  width: 100%;
+  max-width: 520px;
 }
 
 .main-container .container {
   max-width: none;
   width: 100%;
   margin: 0;
+}
+
+@media (min-width: 980px) {
+  .main-container {
+    grid-template-columns: repeat(2, minmax(360px, 520px));
+    justify-content: center;
+  }
 }
 
 .tool-panel {
@@ -190,7 +196,8 @@ body {
   margin-right: 6px;
 }
 
-h1 {
+.container h1,
+.container h2 {
   margin-bottom: 1em;
   color: #0078d7;
 }
@@ -235,6 +242,14 @@ button:hover {
   text-align: center;
   padding: 1em;
   margin-top: auto;
+}
+
+.main-container > .footer {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: calc(520px * 2 + 16px);
+  justify-self: center;
+  margin-top: 0;
 }
 
 @media (max-width: 600px) {

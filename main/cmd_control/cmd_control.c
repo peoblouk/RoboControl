@@ -406,7 +406,7 @@ static int cmd_sensors(int argc, char **argv)
         JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
     };
 
-    bool use_adc_sensors = (ROBOT_USE_SENSORS != 0) && robot_sensors_initialized();
+    bool use_adc_sensors = (SENSOR_COUNT > 0) && robot_sensors_initialized();
     if (use_adc_sensors) {
         for (int i = 0; i < SENSOR_COUNT; i++) {
             printf("Sensor %d: %.1f deg\n", i, sensor_read_angle(i));

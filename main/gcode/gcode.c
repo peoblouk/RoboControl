@@ -5,6 +5,7 @@
 #include "gcode.h"
 
 #include "esp_log.h"
+#include <ctype.h>
 #include <errno.h>
 
 static const char *TAG = "gcode";
@@ -21,6 +22,7 @@ void gcode_set_current_position(float x, float y, float z, float pitch_deg)
     st.y = y;
     st.z = z;
     st.pitch_deg = pitch_deg;
+    st.pose_known = true;
 }
 
 bool gcode_sync_to_robot_pose(void)
@@ -38,6 +40,7 @@ void gcode_reset(void)
 {
     st.absolute = true;
     st.units_mm = true;
+    st.pose_known = false;
     st.feed_mm_s = 50.0f;
     st.pitch_deg = ROBOT_DEFAULT_PITCH_DEG;
     st.x = st.y = st.z = 0.0f;
@@ -58,6 +61,15 @@ void gcode_stop(void)
     robot_cmd_queue_flush();
 }
 
+void gcode_fail_external(const char *msg)
+{
+    if (msg && msg[0] != '\0') {
+        ESP_LOGE(TAG, "%s", msg);
+    }
+    s_error = true;
+    s_stop = true;
+}
+
 static void strip_comment(char *s)
 {
     char *c = strchr(s, ';');
@@ -75,13 +87,64 @@ static bool parse_word(const char *p, char key, float *out)
     return true;
 }
 
-static bool send_xyz_blocking(float x, float y, float z, float pitch_deg, TickType_t timeout)
+static void gcode_set_feed_from_word(float f_word)
+{
+    float v_mm_min = to_mm(f_word);
+    st.feed_mm_s = v_mm_min / 60.0f;
+    if (!isfinite(st.feed_mm_s) || st.feed_mm_s < MIN_V_MM_S) {
+        st.feed_mm_s = MIN_V_MM_S;
+    }
+}
+
+static float compute_move_duration_s(float x0, float y0, float z0,
+                                     float x1, float y1, float z1,
+                                     float v_mm_s)
+{
+    const float dx = x1 - x0;
+    const float dy = y1 - y0;
+    const float dz = z1 - z0;
+    const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+
+    if (!isfinite(v_mm_s) || v_mm_s < MIN_V_MM_S) v_mm_s = MIN_V_MM_S;
+    if (dist < 1e-4f) return MIN_SEG_T;
+    return dist / v_mm_s;
+}
+
+static bool send_xyz_blocking(float x, float y, float z, float pitch_deg, float duration_s, TickType_t timeout)
 {
     TickType_t t0 = xTaskGetTickCount();
 
     while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
-        if (robot_cmd_move_xyz_work(x, y, z, pitch_deg)) {
+        if (robot_cmd_move_xyz_work_t(x, y, z, pitch_deg, duration_s, 0)) {
             vTaskDelay(pdMS_TO_TICKS(60));
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    return false;
+}
+
+static bool send_dwell_blocking(uint32_t dwell_ms, TickType_t timeout)
+{
+    TickType_t t0 = xTaskGetTickCount();
+
+    while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
+        if (robot_cmd_dwell_ms(dwell_ms, 0)) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    return false;
+}
+
+static bool send_gripper_blocking(float gripper_deg, TickType_t timeout)
+{
+    TickType_t t0 = xTaskGetTickCount();
+
+    while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
+        if (robot_cmd_gripper_set(gripper_deg, 0)) {
             return true;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -107,21 +170,66 @@ bool gcode_push_line(const char *line_in)
     strip_comment(line);
     if (line[0] == '\0') return true;
 
-    float g = -1.0f, f = 0.0f, x = 0.0f, y = 0.0f, z = 0.0f;
-    float p = 0.0f;
+    for (char *c = line; *c != '\0'; ++c) {
+        *c = (char)toupper((unsigned char)*c);
+    }
+
+    float g = -1.0f, m = -1.0f, f = 0.0f, x = 0.0f, y = 0.0f, z = 0.0f;
+    float p = 0.0f, s = 0.0f;
 
     bool hasG = parse_word(line, 'G', &g);
+    bool hasM = parse_word(line, 'M', &m);
     bool hasF = parse_word(line, 'F', &f);
     bool hasX = parse_word(line, 'X', &x);
     bool hasY = parse_word(line, 'Y', &y);
     bool hasZ = parse_word(line, 'Z', &z);
     bool hasP = parse_word(line, 'P', &p);
+    bool hasS = parse_word(line, 'S', &s);
 
-    if (hasF && !hasG) {
-        float v_mm_min = to_mm(f);
-        st.feed_mm_s = v_mm_min / 60.0f;
-        if (st.feed_mm_s < MIN_V_MM_S) st.feed_mm_s = MIN_V_MM_S;
+    if (hasG && hasM) {
+        return gcode_abort("Use one command per line (either G or M).");
+    }
+
+    if (hasF && !hasG && !hasM) {
+        gcode_set_feed_from_word(f);
         return true;
+    }
+
+    if (hasM) {
+        const int mi = (int)lroundf(m);
+
+        if (mi == 2 || mi == 30) {
+            s_stop = true;
+            return true;
+        }
+
+        if (mi == 10) {
+            if (!send_gripper_blocking(GRIPPER_OPEN_DEG, pdMS_TO_TICKS(5000))) {
+                return gcode_abort("Queue timeout sending GRIPPER OPEN");
+            }
+            return true;
+        }
+
+        if (mi == 11) {
+            if (!send_gripper_blocking(GRIPPER_CLOSE_DEG, pdMS_TO_TICKS(5000))) {
+                return gcode_abort("Queue timeout sending GRIPPER CLOSE");
+            }
+            return true;
+        }
+
+        if (mi == 280) {
+            if (!hasS) {
+                return gcode_abort("M280 requires S (gripper angle in degrees).");
+            }
+            if (!send_gripper_blocking(s, pdMS_TO_TICKS(5000))) {
+                return gcode_abort("Queue timeout sending GRIPPER S-angle");
+            }
+            return true;
+        }
+
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Unsupported M-code M%d", mi);
+        return gcode_abort(msg);
     }
 
     if (!hasG) return true;
@@ -131,20 +239,31 @@ bool gcode_push_line(const char *line_in)
     if (gi == 91) { st.absolute = false; return true; }
     if (gi == 20) { st.units_mm = false; return true; }
     if (gi == 21) { st.units_mm = true; return true; }
+    if (gi == 4) {
+        float dwell_ms = 0.0f;
+        if (hasP) dwell_ms = p;
+        else if (hasS) dwell_ms = s * 1000.0f;
+        else return gcode_abort("G4 requires P (ms) or S (s).");
+
+        if (dwell_ms < 0.0f) return gcode_abort("G4 dwell must be non-negative.");
+        if (dwell_ms < 0.5f) return true;
+
+        if (!send_dwell_blocking((uint32_t)lroundf(dwell_ms), pdMS_TO_TICKS(8000))) {
+            return gcode_abort("Queue timeout sending DWELL");
+        }
+        return true;
+    }
 
     if (gi == 0 || gi == 1) {
         if (!robot_is_referenced()) {
             return gcode_abort("Robot is not referenced. Run HOME/reference first.");
         }
-
-        if (!robot_has_tcp_estimate()) {
-            return gcode_abort("Robot TCP pose is unknown. Use HOME or cartesian move before G-code.");
+        if (!st.pose_known) {
+            return gcode_abort("Robot TCP pose is unknown. Use HOME or gcode sync before motion.");
         }
 
         if (hasF) {
-            float v_mm_min = to_mm(f);
-            st.feed_mm_s = v_mm_min / 60.0f;
-            if (st.feed_mm_s < MIN_V_MM_S) st.feed_mm_s = MIN_V_MM_S;
+            gcode_set_feed_from_word(f);
         }
 
         float pitch_deg = hasP ? p : st.pitch_deg;
@@ -160,7 +279,10 @@ bool gcode_push_line(const char *line_in)
             return gcode_abort(msg);
         }
 
-        if (!send_xyz_blocking(tx, ty, tz, pitch_deg, pdMS_TO_TICKS(8000))) {
+        const float v_mm_s = (gi == 0) ? RAPID_MM_S : st.feed_mm_s;
+        const float duration_s = compute_move_duration_s(st.x, st.y, st.z, tx, ty, tz, v_mm_s);
+
+        if (!send_xyz_blocking(tx, ty, tz, pitch_deg, duration_s, pdMS_TO_TICKS(8000))) {
             return gcode_abort("Queue timeout sending WORK XYZ");
         }
 
@@ -171,8 +293,9 @@ bool gcode_push_line(const char *line_in)
         return true;
     }
 
-    // Ignore unknown G-codes to stay compatible with common files (e.g. G2/G3/G28).
-    return true;
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Unsupported G-code G%d", gi);
+    return gcode_abort(msg);
 }
 
 bool gcode_run_file(const char *filename)

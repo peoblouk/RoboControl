@@ -10,8 +10,10 @@
 #include <math.h>
 
 static const char *TAG = "robot_io";
+#if SENSOR_COUNT > 0
 static adc_oneshot_unit_handle_t s_adc1 = NULL;
 static adc_oneshot_unit_handle_t s_adc2 = NULL;
+#endif
 
 #define SERVO_DUTY_MAX ((1U << 14) - 1)   // timer is LEDC_TIMER_14_BIT
 
@@ -33,6 +35,7 @@ servo_t servos[SERVO_COUNT] = {
     { .gpio_num = SERVO6_GPIO, .channel = SERVO6_CH }, // J5 (gripper)
 };
 
+#if SENSOR_COUNT > 0
 sensor_t sensors[SENSOR_COUNT] = {
     { .unit = S0_ADC_UNIT, .channel = S0_ADC_CH },
     { .unit = S1_ADC_UNIT, .channel = S1_ADC_CH },
@@ -41,6 +44,7 @@ sensor_t sensors[SENSOR_COUNT] = {
     { .unit = S4_ADC_UNIT, .channel = S4_ADC_CH },
     { .unit = S5_ADC_UNIT, .channel = S5_ADC_CH },
 };
+#endif
 
 const joint_limits_t g_joint_limits[SERVO_COUNT] = {
     { .min_deg = J0_MIN, .max_deg = J0_MAX, .max_deg_s = J0_V }, // servo 0 (J0)
@@ -134,6 +138,9 @@ static inline void base_to_work_xyz(float xb, float yb, float zb, float *xw, flo
     if (zw) *zw = zb - s_work_offset_xyz[2];
 }
 
+// ===============================
+// ROBOT STATE / ESTIMATION
+// ===============================
 static void robot_set_error_internal(robot_error_t err)
 {
     portENTER_CRITICAL(&s_state_mux);
@@ -304,7 +311,11 @@ bool robot_get_tcp_estimate_work(robot_pose_t *pose)
 }
 
 // ===============================
-// SERVO PWM RANGES
+// JOINT / SERVO / SENSOR I/O
+// ===============================
+
+// ===============================
+// SERVO / SERVO MAPPING
 // ===============================
 bool servo_pwm_set_range_us(int servo_id, int min_us, int max_us)
 {
@@ -361,9 +372,7 @@ static inline uint32_t angle_to_duty(int servo_id, float angle_deg)
     return (uint32_t)(duty_f + 0.5f);
 }
 
-// ===============================
-// SERVO/KINEMATICS MAPPING
-// ===============================
+// Servo and joint mapping helpers
 static inline float map_servo(int sid, float joint_deg_math)
 {
     return OFF[sid] + DIR[sid] * joint_deg_math;
@@ -392,9 +401,7 @@ static inline void j1_a_allowed_range(float *lo, float *hi)
     *hi = a_hi;
 }
 
-// ===============================
-// JOINT LIMITS
-// ===============================
+// Joint limits helpers
 static void joint_limits_get(int joint_id, float *lo, float *hi, float *vmax)
 {
     int s = s_joint_master_servo[joint_id];
@@ -414,9 +421,7 @@ static void joint_limits_get(int joint_id, float *lo, float *hi, float *vmax)
     *vmax = v;
 }
 
-// ===============================
-// INITIALIZATION OF SERVOS
-// ===============================
+// Initialization
 void servos_init(void)
 {
     ledc_timer_config_t timer = {
@@ -444,115 +449,7 @@ void servos_init(void)
     ESP_LOGI(TAG, "Servos initialized");
 }
 
-// ===============================
-// INITIALIZATION OF SENSORS
-// ===============================
-void sensors_init(void)
-{
-    bool need_adc1 = false;
-    bool need_adc2 = false;
-
-    for (int i = 0; i < SENSOR_COUNT; i++) {
-        if (sensors[i].unit == ADC_UNIT_1) need_adc1 = true;
-        else if (sensors[i].unit == ADC_UNIT_2) need_adc2 = true;
-    }
-
-    if (need_adc1) {
-        adc_oneshot_unit_init_cfg_t cfg1 = {
-            .unit_id  = ADC_UNIT_1,
-            .clk_src  = ADC_DIGI_CLK_SRC_DEFAULT,
-            .ulp_mode = ADC_ULP_MODE_DISABLE,
-        };
-        ESP_ERROR_CHECK(adc_oneshot_new_unit(&cfg1, &s_adc1));
-    }
-
-    if (need_adc2) {
-        adc_oneshot_unit_init_cfg_t cfg2 = {
-            .unit_id  = ADC_UNIT_2,
-            .clk_src  = ADC_DIGI_CLK_SRC_DEFAULT,
-            .ulp_mode = ADC_ULP_MODE_DISABLE,
-        };
-        ESP_ERROR_CHECK(adc_oneshot_new_unit(&cfg2, &s_adc2));
-    }
-
-    adc_oneshot_chan_cfg_t chan_cfg = {
-        .bitwidth = ADC_BITWIDTH_12,
-        .atten    = ADC_ATTEN_DB_12,
-    };
-
-    for (int i = 0; i < SENSOR_COUNT; i++) {
-        adc_oneshot_unit_handle_t unit =
-            (sensors[i].unit == ADC_UNIT_1) ? s_adc1 : s_adc2;
-
-        ESP_ERROR_CHECK(adc_oneshot_config_channel(
-            unit,
-            sensors[i].channel,
-            &chan_cfg
-        ));
-    }
-
-    ESP_LOGI(TAG, "Sensors initialized (ADC1:%s, ADC2:%s)",
-             need_adc1 ? "yes" : "no",
-             need_adc2 ? "yes" : "no");
-}
-
-// ===============================
-// SENSOR INIT STATE
-// ===============================
-bool robot_sensors_initialized(void)
-{
-    bool need_adc1 = false;
-    bool need_adc2 = false;
-
-    for (int i = 0; i < SENSOR_COUNT; i++) {
-        if (sensors[i].unit == ADC_UNIT_1) need_adc1 = true;
-        else if (sensors[i].unit == ADC_UNIT_2) need_adc2 = true;
-    }
-
-    if (need_adc1 && !s_adc1) return false;
-    if (need_adc2 && !s_adc2) return false;
-    return true;
-}
-
-// ===============================
-// SENSOR READ RAW DATA (0-4095)
-// ===============================
-int sensor_read_raw(int id)
-{
-    if (id < 0 || id >= SENSOR_COUNT) return -1;
-
-    adc_oneshot_unit_handle_t unit =
-        (sensors[id].unit == ADC_UNIT_1) ? s_adc1 : s_adc2;
-
-    if (!unit) {
-        ESP_LOGW(TAG, "ADC unit not init for sensor %d", id);
-        return -1;
-    }
-
-    int raw = 0;
-    esp_err_t err = adc_oneshot_read(unit, sensors[id].channel, &raw);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ADC read failed: id=%d unit=%d ch=%d err=%s",
-                 id, sensors[id].unit, sensors[id].channel,
-                 esp_err_to_name(err));
-        return -1;
-    }
-    return raw;
-}
-
-// ===============================
-// SENSOR READ ANGLE (0-180 deg)
-// ===============================
-float sensor_read_angle(int id)
-{
-    int raw = sensor_read_raw(id);
-    if (raw < 0) return -1;
-    return (raw / 4095.0f) * 180.0f;
-}
-
-// ===============================
-// LOW-LEVEL SERVO WRITE
-// ===============================
+// Low-level servo write
 static void servo_write_angle_hw(int master, float angle, int other, float other_angle)
 {
     uint32_t duty = angle_to_duty(master, angle);
@@ -566,9 +463,6 @@ static void servo_write_angle_hw(int master, float angle, int other, float other
     }
 }
 
-// ===============================
-// SET SERVO ANGLE
-// ===============================
 void servo_set_angle(int servo_id, float angle)
 {
     if (servo_id < 0 || servo_id >= SERVO_COUNT) {
@@ -625,9 +519,6 @@ static void seed_last_q_from_home(void)
     robot_validate_and_prepare_q(s_last_q, true);
 }
 
-// ===============================
-// SET JOINT ANGLE
-// ===============================
 void joint_set_angle(int joint_id, float angle)
 {
     if (joint_id < 0 || joint_id >= JOINT_COUNT) {
@@ -640,7 +531,119 @@ void joint_set_angle(int joint_id, float angle)
 }
 
 // ===============================
-// VALIDATE / CLAMP q[SERVO_COUNT]
+// SENSORS / SENSOR INIT
+// ===============================
+void sensors_init(void)
+{
+#if SENSOR_COUNT <= 0
+    ESP_LOGI(TAG, "Sensorless mode: SENSOR_COUNT=0");
+    return;
+#else
+    bool need_adc1 = false;
+    bool need_adc2 = false;
+
+    for (int i = 0; i < SENSOR_COUNT; i++) {
+        if (sensors[i].unit == ADC_UNIT_1) need_adc1 = true;
+        else if (sensors[i].unit == ADC_UNIT_2) need_adc2 = true;
+    }
+
+    if (need_adc1) {
+        adc_oneshot_unit_init_cfg_t cfg1 = {
+            .unit_id  = ADC_UNIT_1,
+            .clk_src  = ADC_DIGI_CLK_SRC_DEFAULT,
+            .ulp_mode = ADC_ULP_MODE_DISABLE,
+        };
+        ESP_ERROR_CHECK(adc_oneshot_new_unit(&cfg1, &s_adc1));
+    }
+
+    if (need_adc2) {
+        adc_oneshot_unit_init_cfg_t cfg2 = {
+            .unit_id  = ADC_UNIT_2,
+            .clk_src  = ADC_DIGI_CLK_SRC_DEFAULT,
+            .ulp_mode = ADC_ULP_MODE_DISABLE,
+        };
+        ESP_ERROR_CHECK(adc_oneshot_new_unit(&cfg2, &s_adc2));
+    }
+
+    adc_oneshot_chan_cfg_t chan_cfg = {
+        .bitwidth = ADC_BITWIDTH_12,
+        .atten    = ADC_ATTEN_DB_12,
+    };
+
+    for (int i = 0; i < SENSOR_COUNT; i++) {
+        adc_oneshot_unit_handle_t unit =
+            (sensors[i].unit == ADC_UNIT_1) ? s_adc1 : s_adc2;
+
+        ESP_ERROR_CHECK(adc_oneshot_config_channel(
+            unit,
+            sensors[i].channel,
+            &chan_cfg
+        ));
+    }
+
+    ESP_LOGI(TAG, "Sensors initialized (ADC1:%s, ADC2:%s)",
+             need_adc1 ? "yes" : "no",
+             need_adc2 ? "yes" : "no");
+#endif
+}
+
+// Sensor helpers
+bool robot_sensors_initialized(void)
+{
+#if SENSOR_COUNT <= 0
+    return false;
+#else
+    bool need_adc1 = false;
+    bool need_adc2 = false;
+
+    for (int i = 0; i < SENSOR_COUNT; i++) {
+        if (sensors[i].unit == ADC_UNIT_1) need_adc1 = true;
+        else if (sensors[i].unit == ADC_UNIT_2) need_adc2 = true;
+    }
+
+    if (need_adc1 && !s_adc1) return false;
+    if (need_adc2 && !s_adc2) return false;
+    return true;
+#endif
+}
+
+int sensor_read_raw(int id)
+{
+#if SENSOR_COUNT <= 0
+    (void)id;
+    return -1;
+#else
+    if (id < 0 || id >= SENSOR_COUNT) return -1;
+
+    adc_oneshot_unit_handle_t unit =
+        (sensors[id].unit == ADC_UNIT_1) ? s_adc1 : s_adc2;
+
+    if (!unit) {
+        ESP_LOGW(TAG, "ADC unit not init for sensor %d", id);
+        return -1;
+    }
+
+    int raw = 0;
+    esp_err_t err = adc_oneshot_read(unit, sensors[id].channel, &raw);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "ADC read failed: id=%d unit=%d ch=%d err=%s",
+                 id, sensors[id].unit, sensors[id].channel,
+                 esp_err_to_name(err));
+        return -1;
+    }
+    return raw;
+#endif
+}
+
+float sensor_read_angle(int id)
+{
+    int raw = sensor_read_raw(id);
+    if (raw < 0) return -1;
+    return (raw / 4095.0f) * 180.0f;
+}
+
+// ===============================
+// JOINT / MOTION VALIDATION
 // ===============================
 bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
 {
@@ -818,8 +821,16 @@ static bool inverse_kinematics_tcp(float x, float y, float z,
     return true;
 }
 
+bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SERVO_COUNT])
+{
+    if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
+
+    robot_validate_and_prepare_q(q_target, true);
+    return true;
+}
+
 // ===============================
-// SEGMENT BUFFER
+// PLANNER / EXECUTOR
 // ===============================
 static bool seg_full(void)  { return ((s_seg_w + 1) % SEG_BUF_LEN) == s_seg_r; }
 static bool seg_empty(void) { return s_seg_w == s_seg_r; }
@@ -843,6 +854,24 @@ static bool seg_pop(traj_seg_t *s) {
     return true;
 }
 
+static void planner_get_tail_q(float q[SERVO_COUNT])
+{
+    if (!seg_empty()) {
+        int idx = (s_seg_w - 1 + SEG_BUF_LEN) % SEG_BUF_LEN;
+        for (int i = 0; i < SERVO_COUNT; i++) q[i] = s_seg_buf[idx].q1[i];
+        return;
+    }
+
+    if (s_current_segment.active) {
+        for (int i = 0; i < SERVO_COUNT; i++) q[i] = s_current_segment.q1[i];
+        return;
+    }
+
+    portENTER_CRITICAL(&s_state_mux);
+    for (int i = 0; i < SERVO_COUNT; i++) q[i] = s_last_q[i];
+    portEXIT_CRITICAL(&s_state_mux);
+}
+
 static float smoothstep(float s) {
     if (s < 0) s = 0;
     if (s > 1) s = 1;
@@ -857,9 +886,6 @@ static void apply_joints(const float q[SERVO_COUNT])
     }
 }
 
-// ===============================
-// ROBOT CONTROL TASK
-// ===============================
 static void robot_control_task(void *arg)
 {
     (void)arg;
@@ -909,17 +935,16 @@ static void robot_control_task(void *arg)
             }
 
             traj_seg_t seg = {0};
-            portENTER_CRITICAL(&s_state_mux);
-            for (int i = 0; i < SERVO_COUNT; i++) seg.q0[i] = s_last_q[i];
-            portEXIT_CRITICAL(&s_state_mux);
+            planner_get_tail_q(seg.q0);
             seg.tcp_target_valid = false;
+            seg.preserve_tcp_estimate = false;
             seg.mark_referenced_on_finish = false;
 
             switch (cmd.type) {
             case ROBOT_CMD_MOVE_JOINTS:
                 for (int i = 0; i < SERVO_COUNT; i++) seg.q1[i] = cmd.q_target[i];
                 robot_validate_and_prepare_q(seg.q1, true);
-                seg.T = 1.0f;
+                seg.T = (cmd.duration_s > 0.0f) ? cmd.duration_s : 1.0f;
                 seg.tcp_target_valid = cmd.tcp_target_valid;
                 seg.mark_referenced_on_finish = cmd.mark_referenced_on_finish;
                 seg.tcp_target_base.x = cmd.x;
@@ -938,8 +963,20 @@ static void robot_control_task(void *arg)
 
                 bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
                 if (!ok) {
-                    ESP_LOGW(TAG, "IK TCP failed");
-                    s_operating = s_current_segment.active || !seg_empty();
+                    ESP_LOGE(TAG, "IK TCP failed for BASE x=%.1f y=%.1f z=%.1f pitch=%.1f",
+                             cmd.x, cmd.y, cmd.z, pitch);
+
+                    if (robot_is_program_running()) {
+                        robot_set_error_internal(ROBOT_ERROR_GCODE);
+                        gcode_fail_external("Planner IK failed for queued XYZ move");
+
+                        seg_flush();
+                        while (xQueueReceive(s_robot_queue, &cmd, 0) == pdTRUE) {
+                        }
+                        s_operating = false;
+                    } else {
+                        s_operating = s_current_segment.active || !seg_empty();
+                    }
                     continue;
                 }
 
@@ -947,7 +984,7 @@ static void robot_control_task(void *arg)
                          seg.q1[0], seg.q1[1], seg.q1[3], seg.q1[4]);
 
                 robot_validate_and_prepare_q(seg.q1, true);
-                seg.T = 1.0f;
+                seg.T = (cmd.duration_s > 0.0f) ? cmd.duration_s : 1.0f;
                 seg.tcp_target_valid = true;
                 seg.tcp_target_base.x = cmd.x;
                 seg.tcp_target_base.y = cmd.y;
@@ -967,6 +1004,22 @@ static void robot_control_task(void *arg)
                 seg.tcp_target_base.z = cmd.z;
                 seg.tcp_target_base.pitch_deg = cmd.pitch_deg;
                 break;
+
+            case ROBOT_CMD_DWELL:
+                for (int i = 0; i < SERVO_COUNT; i++) seg.q1[i] = seg.q0[i];
+                seg.T = ((float)cmd.dwell_ms) / 1000.0f;
+                seg.preserve_tcp_estimate = true;
+                break;
+
+            case ROBOT_CMD_GRIPPER: {
+                for (int i = 0; i < SERVO_COUNT; i++) seg.q1[i] = seg.q0[i];
+                const float lo = g_joint_limits[SERVO_J5].min_deg;
+                const float hi = g_joint_limits[SERVO_J5].max_deg;
+                seg.q1[SERVO_J5] = clampf(cmd.gripper_deg, lo, hi);
+                seg.T = (cmd.duration_s > 0.0f) ? cmd.duration_s : GRIPPER_MOVE_T_S;
+                seg.preserve_tcp_estimate = true;
+                break;
+            }
 
             default:
                 ESP_LOGW(TAG, "Unknown robot command: %d", cmd.type);
@@ -991,6 +1044,16 @@ static void robot_control_task(void *arg)
             }
             s_current_segment.t = 0;
             s_current_segment.active = true;
+
+            if (s_current_segment.preserve_tcp_estimate) {
+                robot_pose_t pose;
+                if (robot_get_tcp_estimate_base(&pose)) {
+                    s_current_segment.tcp_target_base = pose;
+                    s_current_segment.tcp_target_valid = true;
+                } else {
+                    s_current_segment.tcp_target_valid = false;
+                }
+            }
         }
 
         s_current_segment.t += EXEC_DT_S;
@@ -1010,7 +1073,16 @@ static void robot_control_task(void *arg)
             for (int i = 0; i < SERVO_COUNT; i++) s_last_q[i] = s_current_segment.q1[i];
             portEXIT_CRITICAL(&s_state_mux);
 
-            if (s_current_segment.tcp_target_valid) {
+            if (s_current_segment.preserve_tcp_estimate) {
+                if (s_current_segment.tcp_target_valid) {
+                    robot_tcp_estimate_set_base(s_current_segment.tcp_target_base.x,
+                                                s_current_segment.tcp_target_base.y,
+                                                s_current_segment.tcp_target_base.z,
+                                                s_current_segment.tcp_target_base.pitch_deg);
+                } else {
+                    robot_tcp_estimate_invalidate();
+                }
+            } else if (s_current_segment.tcp_target_valid) {
                 robot_tcp_estimate_set_base(s_current_segment.tcp_target_base.x,
                                             s_current_segment.tcp_target_base.y,
                                             s_current_segment.tcp_target_base.z,
@@ -1074,6 +1146,8 @@ void robot_disarm(void)
     s_armed = false;
     s_operating = false;
     robot_stop_all();
+    robot_clear_reference();
+    ESP_LOGI(TAG, "Disarmed: reference invalidated");
 
     for (int i = 0; i < SERVO_COUNT; i++) {
         ledc_stop(LEDC_LOW_SPEED_MODE, servos[i].channel, 0);
@@ -1088,7 +1162,7 @@ void robot_arm(void)
 }
 
 // ===============================
-// START ROBOT CONTROL
+// CONTROL API
 // ===============================
 void robot_control_start(void)
 {
@@ -1142,6 +1216,11 @@ bool robot_cmd_move_joints_home(const float q_target[SERVO_COUNT],
 
 bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg)
 {
+    return robot_cmd_move_xyz_t(x, y, z, pitch_deg, 0.0f, 0);
+}
+
+bool robot_cmd_move_xyz_t(float x, float y, float z, float pitch_deg, float duration_s, TickType_t timeout)
+{
     if (!s_armed) return false;
     if (s_robot_queue == NULL) return false;
 
@@ -1149,13 +1228,19 @@ bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg)
     cmd.type = ROBOT_CMD_MOVE_XYZ;
     cmd.x = x; cmd.y = y; cmd.z = z;
     cmd.pitch_deg = pitch_deg;
+    cmd.duration_s = duration_s;
 
-    bool queued = (xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE);
+    bool queued = (xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE);
     if (queued) robot_set_sync_ready(false);
     return queued;
 }
 
 bool robot_cmd_move_xyz_work(float x, float y, float z, float pitch_deg)
+{
+    return robot_cmd_move_xyz_work_t(x, y, z, pitch_deg, 0.0f, 0);
+}
+
+bool robot_cmd_move_xyz_work_t(float x, float y, float z, float pitch_deg, float duration_s, TickType_t timeout)
 {
     if (!s_referenced) {
         ESP_LOGW(TAG, "Rejecting work-frame move: robot not referenced");
@@ -1164,7 +1249,7 @@ bool robot_cmd_move_xyz_work(float x, float y, float z, float pitch_deg)
 
     float xb, yb, zb;
     work_to_base_xyz(x, y, z, &xb, &yb, &zb);
-    return robot_cmd_move_xyz(xb, yb, zb, pitch_deg);
+    return robot_cmd_move_xyz_t(xb, yb, zb, pitch_deg, duration_s, timeout);
 }
 
 bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s, TickType_t timeout)
@@ -1182,6 +1267,35 @@ bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s
     return queued;
 }
 
+bool robot_cmd_dwell_ms(uint32_t dwell_ms, TickType_t timeout)
+{
+    if (!s_armed) return false;
+    if (s_robot_queue == NULL) return false;
+
+    robot_cmd_t cmd = {0};
+    cmd.type = ROBOT_CMD_DWELL;
+    cmd.dwell_ms = dwell_ms;
+
+    bool queued = (xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE);
+    if (queued) robot_set_sync_ready(false);
+    return queued;
+}
+
+bool robot_cmd_gripper_set(float gripper_deg, TickType_t timeout)
+{
+    if (!s_armed) return false;
+    if (s_robot_queue == NULL) return false;
+
+    robot_cmd_t cmd = {0};
+    cmd.type = ROBOT_CMD_GRIPPER;
+    cmd.gripper_deg = gripper_deg;
+    cmd.duration_s = GRIPPER_MOVE_T_S;
+
+    bool queued = (xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE);
+    if (queued) robot_set_sync_ready(false);
+    return queued;
+}
+
 void robot_cmd_queue_flush(void)
 {
     if (s_robot_queue == NULL) return;
@@ -1193,7 +1307,7 @@ void robot_cmd_queue_flush(void)
 }
 
 // ===============================
-// RUN GCODE FILE
+// GCODE EXECUTION
 // ===============================
 static void gcode_executor_task(void *arg)
 {
@@ -1218,14 +1332,6 @@ static void gcode_executor_task(void *arg)
     s_gcode_running = false;
     portEXIT_CRITICAL(&s_state_mux);
     vTaskDelete(NULL);
-}
-
-bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SERVO_COUNT])
-{
-    if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
-
-    robot_validate_and_prepare_q(q_target, true);
-    return true;
 }
 
 bool robot_core_run_gcode(const char *filename)

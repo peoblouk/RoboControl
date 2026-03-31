@@ -113,6 +113,7 @@ static inline const char *robot_state_str_(void) {
 static void ws_send_sensors_to_fd(int fd) {
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "state", robot_state_str_());
+    cJSON_AddNumberToObject(root, "can_node_id", (double)CAN_NODE_ID);
     cJSON_AddBoolToObject(root, "armed", robot_is_armed());
     cJSON_AddBoolToObject(root, "referenced", robot_is_referenced());
     cJSON_AddBoolToObject(root, "tcp_est_valid", robot_has_tcp_estimate());
@@ -326,6 +327,7 @@ static void ws_task_sensors(void *arg) {
     for (;;) {
         cJSON *root = cJSON_CreateObject();
         cJSON_AddStringToObject(root, "state", robot_state_str_());
+        cJSON_AddNumberToObject(root, "can_node_id", (double)CAN_NODE_ID);
         cJSON_AddBoolToObject(root, "armed", robot_is_armed());
         cJSON_AddBoolToObject(root, "referenced", robot_is_referenced());
         cJSON_AddBoolToObject(root, "tcp_est_valid", robot_has_tcp_estimate());

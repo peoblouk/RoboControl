@@ -82,7 +82,8 @@ function setRobotUI(state) {
   const elDot = document.getElementById("robot-dot");
   if (!elText || !elDot) return;
 
-  elText.textContent = state || "Unknown";
+  const label = state === "UNREFERENCED" ? "UNREF" : state;
+  elText.textContent = label || "Unknown";
 
   if (state === "OPERATING" || state === "RUNNING") elDot.style.background = "#22c55e";
   else if (state === "IDLE") elDot.style.background = "#fbbf24";
@@ -90,6 +91,13 @@ function setRobotUI(state) {
   else if (state === "DISARMED") elDot.style.background = "#ef4444";
   else if (state === "ALARM" || state === "ERROR" || state === "STOPPED") elDot.style.background = "#ef4444";
   else elDot.style.background = "#888";
+}
+
+function setCanNodeUI(id) {
+  const el = document.getElementById("can-node-id");
+  if (!el) return;
+  const n = Number(id);
+  el.textContent = Number.isFinite(n) ? String(n) : "-";
 }
 
 async function loadControlLimits() {
@@ -194,6 +202,7 @@ function initControlWS() {
     }
 
     if (data.state) setRobotUI(data.state);
+    if (Object.prototype.hasOwnProperty.call(data, "can_node_id")) setCanNodeUI(data.can_node_id);
 
     if (data.sensors && Array.isArray(data.sensors)) {
       data.sensors.forEach((s) => {
@@ -239,6 +248,7 @@ function initControlWS() {
   ws.onclose = () => {
     setWifiUI(false);
     setRobotUI("Offline");
+    setCanNodeUI(null);
     setTimeout(initControlWS, 2000);
   };
 
@@ -572,6 +582,23 @@ function nextMeasurementPoint() {
   }
 }
 
+function reverseMeasurementSeries() {
+  if (!measurementSeries.length && !prepareMeasurementSeries()) return;
+
+  const len = measurementSeries.length;
+  const prevIndex = clamp(measurementIndex, 0, len - 1);
+
+  measurementSeries.reverse();
+  measurementIndex = len - 1 - prevIndex;
+
+  const point = currentMeasurementPoint();
+  if (point) {
+    setXYZValues(point.x, point.y, point.z);
+  }
+
+  updateMeasurementStatus("Series reversed");
+}
+
 function setMeasurementPresetValues(values = {}) {
   const axisEl = document.getElementById("meas_axis");
   const xEl = document.getElementById("meas_x");
@@ -873,6 +900,7 @@ function bootControlPage() {
 
   setWifiUI(false);
   setRobotUI("Unknown");
+  setCanNodeUI(null);
 
   // pitch init
   const savedPitch = Number(localStorage.getItem("pitch_deg"));
@@ -917,11 +945,13 @@ function initSettingsWS() {
         return;
       }
       if (data.state) setRobotUI(data.state);
+      if (Object.prototype.hasOwnProperty.call(data, "can_node_id")) setCanNodeUI(data.can_node_id);
     };
 
     ws.onclose = () => {
       setWifiUI(false);
       setRobotUI("Offline");
+      setCanNodeUI(null);
       setTimeout(initSettingsWS, 2000);
     };
 
@@ -1011,6 +1041,7 @@ async function loadSettingsLimitsTable() {
 function bootSettingsPage() {
   setWifiUI(false);
   setRobotUI("Unknown");
+  setCanNodeUI(null);
   initSettingsWS();
   loadSettingsLimitsTable();
 }

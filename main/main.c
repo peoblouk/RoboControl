@@ -27,7 +27,9 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     servos_init();             // Initialize servos
-    //sensors_init();          // Initialize sensors
+    #if SENSOR_COUNT > 0
+        sensors_init();            // Initialize sensors
+    #endif
 
     wifi_server_start();       // Start HTTP Server
     robot_control_start();     // Start robot control task

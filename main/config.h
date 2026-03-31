@@ -12,12 +12,21 @@
 #define CORE_ROBOT  1   // servos, sensors, control
 
 // ===============================
+// NODE PROFILE
+// ===============================
+#define ROBOT_NODE_ID 2 // Unique ID
+
+#if (ROBOT_NODE_ID < 1) || (ROBOT_NODE_ID > 127)
+#error "ROBOT_NODE_ID must be in range 1..127"
+#endif
+
+// ===============================
 // CAN / TWAI CONFIGURATION
 // ===============================
 #define CAN_TX_GPIO             GPIO_NUM_14
 #define CAN_RX_GPIO             GPIO_NUM_13
 #define CAN_BITRATE             500000
-#define CAN_NODE_ID             0x01
+#define CAN_NODE_ID             ((ROBOT_NODE_ID) & 0x7FU)
 #define CAN_STATUS_PERIOD_MS    500
 #define CAN_TX_QUEUE_LEN        16
 #define CAN_RX_QUEUE_LEN        16
@@ -39,7 +48,7 @@
 // ROBOT: COUNTS
 // ===============================
 #define SERVO_COUNT   7
-#define SENSOR_COUNT  6
+#define SENSOR_COUNT  0
 #define JOINT_COUNT   6
 
 // ===============================
@@ -69,7 +78,9 @@
 // ===============================
 #define SERVO_PWM_FREQ 50     // 50 Hz = 20 ms period
 
-// PWM range (µs) — 0° => MIN, 180° => MAX
+// Calibration profile by node ID.
+#if ROBOT_NODE_ID == 1
+// NODE 1 (current calibration)
 #define SERVO0_MIN_US  700
 #define SERVO0_MAX_US  2300
 
@@ -91,6 +102,69 @@
 #define SERVO6_MIN_US  720
 #define SERVO6_MAX_US  2000
 
+#define SERVO0_OFF_DEG  75.0f
+#define SERVO1_OFF_DEG  175.0f
+#define SERVO2_OFF_DEG  175.0f
+#define SERVO3_OFF_DEG  149.0f
+#define SERVO4_OFF_DEG  70.0f
+#define SERVO5_OFF_DEG  98.0f
+#define SERVO6_OFF_DEG  0.0f
+
+#define SERVO0_DIR      +1.0f
+#define SERVO1_DIR      -1.0f
+#define SERVO2_DIR      -1.0f
+#define SERVO3_DIR      +1.0f
+#define SERVO4_DIR      -1.0f
+#define SERVO5_DIR      +1.0f
+#define SERVO6_DIR      +1.0f
+
+#define J1_B_TRIM_DEG   -0.5f
+
+#elif ROBOT_NODE_ID == 2
+// NODE 2
+#define SERVO0_MIN_US  700
+#define SERVO0_MAX_US  2300
+
+#define SERVO1_MIN_US  850
+#define SERVO1_MAX_US  2300
+
+#define SERVO2_MIN_US  850
+#define SERVO2_MAX_US  2300
+
+#define SERVO3_MIN_US  750
+#define SERVO3_MAX_US  2350
+
+#define SERVO4_MIN_US  650
+#define SERVO4_MAX_US  2400
+
+#define SERVO5_MIN_US  1000
+#define SERVO5_MAX_US  2300
+
+#define SERVO6_MIN_US  720
+#define SERVO6_MAX_US  2000
+
+#define SERVO0_OFF_DEG  75.0f
+#define SERVO1_OFF_DEG  175.0f
+#define SERVO2_OFF_DEG  175.0f
+#define SERVO3_OFF_DEG  149.0f
+#define SERVO4_OFF_DEG  70.0f
+#define SERVO5_OFF_DEG  98.0f
+#define SERVO6_OFF_DEG  0.0f
+
+#define SERVO0_DIR      +1.0f
+#define SERVO1_DIR      -1.0f
+#define SERVO2_DIR      -1.0f
+#define SERVO3_DIR      +1.0f
+#define SERVO4_DIR      -1.0f
+#define SERVO5_DIR      +1.0f
+#define SERVO6_DIR      +1.0f
+
+#define J1_B_TRIM_DEG   -0.5f
+
+#else
+#error "Calibration profile for this ROBOT_NODE_ID is not defined (supported: 1, 2)"
+#endif
+
 #define SERVO_PWM_RANGES_INIT { \
     { SERVO0_MIN_US, SERVO0_MAX_US }, \
     { SERVO1_MIN_US, SERVO1_MAX_US }, \
@@ -105,25 +179,6 @@
 // ROBOT: SERVO MAPPING (OFF / DIR)
 // ===============================
 // joint_deg_math -> servo_deg = OFF + DIR * joint_deg_math
-#define SERVO0_OFF_DEG  75.0f
-#define SERVO1_OFF_DEG  175.0f
-#define SERVO2_OFF_DEG  175.0f
-#define SERVO3_OFF_DEG  149.0f
-#define SERVO4_OFF_DEG  70.0f
-#define SERVO5_OFF_DEG  98.0f
-#define SERVO6_OFF_DEG  0.0f
-
-// #define SERVO1_OFF_DEG  173.0f
-// #define SERVO2_OFF_DEG  173.0f
-// #define SERVO3_OFF_DEG  151.0f
-
-#define SERVO0_DIR      +1.0f
-#define SERVO1_DIR      -1.0f
-#define SERVO2_DIR      -1.0f
-#define SERVO3_DIR      +1.0f
-#define SERVO4_DIR      -1.0f
-#define SERVO5_DIR      +1.0f
-#define SERVO6_DIR      +1.0f
 
 #define SERVO_OFF_INIT { \
     SERVO0_OFF_DEG, SERVO1_OFF_DEG, SERVO2_OFF_DEG, \
@@ -138,11 +193,6 @@
 // #define SERVO_OFF_INIT { 75.0f, 175.0f, 175.0f, 149.0f, 90.0f, 90.0f, 90.0f }
 // #define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f }
 //correct for "L" pose with current calibration | move 92.5 0 183.0 |
-
-// ===============================
-// ROBOT: J1 FOLLOWER
-// ===============================
-#define J1_B_TRIM_DEG        -0.5f
 
 // ===============================
 // ROBOT: EXECUTOR / TIMING
@@ -168,26 +218,19 @@
 // ===============================
 #define L0 81.9f            //75.5f // height of J0 above the base
 #define J1_X_OFFSET  18.2f  // offset from J0 to the vertical plane of J1
-
-// #define L1  116.0f
-// #define L2   79.5f
-
-#define L1 115.9f
-#define L2 79.4f
-
-//#define L1  107.5f          // J1 -> J2
-//#define L2   74.5f          // J2 -> J3
+#define L1 115.9f // #define L1  116.0f //  107.5f 
+#define L2 79.4f  // #define L2   79.5f //   74.5f 
 #define L3   58.8f          // J3 -> J4
 #define L4_OPEN   70.0f     // J4 -> gripper closed (90 degree)
 #define L4_CLOSED 54.6f     // J4 -> gripper open (0 degree)
 
-// Tool length;;
+// Tool length [mm]
 #define L_TOOL_OPEN   (L3 + L4_OPEN)    // 128.8 mm
 #define L_TOOL_CLOSED (L3 + L4_CLOSED)  // 113.4 mm
 
-// kompatibilita se starým kódem pro budoucí TCP
-#define L_TOOL L_TOOL_OPEN
-#define ROBOT_TCP_IK_TOOL_LEN_MM 0.0f
+
+// TCP tool length used by IK [mm]
+#define ROBOT_TCP_IK_TOOL_LEN_MM L_TOOL_OPEN
 
 // ===============================
 // ROBOT: JOINT LIMITS (deg / deg/s)
@@ -268,10 +311,17 @@
 #define RAPID_MM_S  200.0f
 #define MIN_V_MM_S  1.0f
 
+// Gripper defaults for M10/M11 (adjust per real tool mechanics)
+#define GRIPPER_OPEN_DEG   90.0f
+#define GRIPPER_CLOSE_DEG  0.0f
+#define GRIPPER_MOVE_T_S   0.30f
+
 // ===============================
 // SERVER CONFIGURATION
 // ===============================
-#define WIFI_SSID      "RoboControl"
+#define RC_STR_HELPER(x) #x
+#define RC_STR(x) RC_STR_HELPER(x)
+#define WIFI_SSID      "RoboControl_" RC_STR(ROBOT_NODE_ID)
 #define WIFI_PASS      "Robo-Control123"
 #define MAX_STA_CONN   4
 #define WS_MAX_CLIENTS 4
@@ -303,26 +353,37 @@
 // Robot Positions
 // ===============================
 #define HOME_J0 75
-#define HOME_J1 80
-#define HOME_J2 30
-#define HOME_J3 120 
-#define HOME_J4 90
-#define HOME_J5 90
+#define HOME_J1 60
+#define HOME_J2 60
+#define HOME_J3 65 
+#define HOME_J4 154
+#define HOME_J5 96
 #define HOME_J6 90
+
+#define HOME_Q_INIT { \
+    HOME_J0, \
+    HOME_J1, \
+    (HOME_J2 + J1_B_TRIM_DEG), \
+    HOME_J3, \
+    HOME_J4, \
+    HOME_J5, \
+    HOME_J6 \
+}
 
 // ===============================
 // ROBOT: SENSORLESS / REFERENCE
 // ===============================
-#define ROBOT_USE_SENSORS 0
+// SENSOR_COUNT = 0 => sensorless mode
 
-#define ROBOT_WORK_OFFSET_X_DEFAULT 0.0f
-#define ROBOT_WORK_OFFSET_Y_DEFAULT 0.0f
-#define ROBOT_WORK_OFFSET_Z_DEFAULT 0.0f
+#define ROBOT_HOME_X_BASE_DEFAULT     106.0f
+#define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
+#define ROBOT_HOME_Z_BASE_DEFAULT     114.3f
+#define ROBOT_HOME_PITCH_DEG_DEFAULT    20.0f
 
-#define ROBOT_HOME_X_BASE_DEFAULT   0.0f
-#define ROBOT_HOME_Y_BASE_DEFAULT   0.0f
-#define ROBOT_HOME_Z_BASE_DEFAULT   0.0f
-#define ROBOT_HOME_PITCH_DEG_DEFAULT 0.0f
+// Default WORK offset = HOME TCP in BASE.
+#define ROBOT_WORK_OFFSET_X_DEFAULT ROBOT_HOME_X_BASE_DEFAULT
+#define ROBOT_WORK_OFFSET_Y_DEFAULT ROBOT_HOME_Y_BASE_DEFAULT
+#define ROBOT_WORK_OFFSET_Z_DEFAULT ROBOT_HOME_Z_BASE_DEFAULT
 
 // // withouth tool
 // #define ROBOT_WORK_OFFSET_X_DEFAULT 140.0f
@@ -342,17 +403,5 @@
 // #define ROBOT_HOME_Y_BASE_DEFAULT   0.0f
 // #define ROBOT_HOME_Z_BASE_DEFAULT   80.0f
 // #define ROBOT_HOME_PITCH_DEG_DEFAULT 0.0f
-
-// Home pose v servo prostoru:
-// s0, s1, s2(follower), s3, s4, s5, s6
-#define HOME_Q_INIT { \
-    75.0f, \
-    80.0f, \
-    (80.0f + J1_B_TRIM_DEG), \
-    30.0f, \
-    70.0f, \
-    90.0f, \
-    90.0f \
-}
 
 #endif // CONFIG_H
