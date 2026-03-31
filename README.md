@@ -6,25 +6,27 @@
   <img src="spiffs/web/robocontrol.ico" alt="RoboControl icon" width="50" />
 </p>
 
-RoboControl je projekt pro rizeni 6DOF robotickeho ramene na ESP32-S3.
-Aktualni verze pouziva:
+RoboControl je firmware pro rizeni 6DOF robotickeho ramene na ESP32-S3.
+Aktualni verze kombinuje:
 
 - Web UI + WebSocket (`/ws`)
-- UART konzoli pres `esp_console` REPL (linenoise)
-- planner s frontou pohybu, arm/disarm bezpecnost a HOME/reference workflow
-- stavovou onboard RGB LED (WS2812)
+- UART konzoli pres `esp_console` REPL
+- planner pohybu s HOME/reference workflow
+- CAN/TWAI ridici protokol pro nadrizeny system
+- onboard RGB LED (WS2812) jako stavovou signalizaci
 
 ---
 
 ## Co je hotove
 
-- Rizeni 6 kloubu (+ follower servo pro J1 a rezerva pro gripper)
-- Jednoducha planarni IK (`move_xyz`) s work offsetem
-- HOME prikaz, ktery zalozi referenci robota
-- G-code pipeline (`run file`, `line`, `stop`, `reset`, `sync`)
+- Rizeni 6 kloubu (+ follower servo pro J1 a gripper kanal)
+- IK v WORK souradnicich (`move`, `move_xyz`) s offsetem
+- HOME prikaz, ktery po dojeti nastavuje referenci
+- G-code pipeline (`run`, `line`, `stop`, `reset`, `sync`)
 - SoftAP HTTP server + WebSocket telemetrie
-- File manager pro `.txt` a `.gcode` ve SPIFFS
-- Stavova RGB LED na desce ESP32-S3-DevKitC-1
+- SPIFFS file manager (`/spiffs/data`) pro `.txt` a `.gcode`
+- CAN upload/spousteni programu po slotech (`can_slot_0..3.gcode`)
+- Stavova RGB LED na ESP32-S3-DevKitC-1
 
 ---
 
@@ -34,12 +36,19 @@ Aktualni verze pouziva:
 main/
 |-- main.c
 |-- config.h
+|-- can_communication/
+|   |-- can_communication.c
+|   `-- can_communication.h
 |-- robot_io/
 |   |-- robot_io.c
 |   `-- robot_io.h
 |-- wifi_server/
 |   |-- wifi_server.c
-|   `-- wifi_server.h
+|   |-- wifi_server.h
+|   |-- http_handlers.c
+|   |-- ws_handlers.c
+|   |-- file_manager.c
+|   `-- *.h
 |-- cmd_control/
 |   |-- cmd_control.c
 |   `-- cmd_control.h
@@ -49,10 +58,25 @@ main/
 |-- status_led/
 |   |-- status_led.c
 |   `-- status_led.h
-`-- rt_stats/
-    |-- rt_stats.c
-    `-- rt_stats.h
+|-- rt_stats/
+|   |-- rt_stats.c
+|   `-- rt_stats.h
+`-- certs/
+    |-- servercert.pem
+    `-- prvtkey.pem
 ```
+
+---
+
+## Konfigurace uzlu
+
+Hlavni volby jsou v `main/config.h`:
+
+- `ROBOT_NODE_ID` (aktualne `2`)
+- `WIFI_SSID = "RoboControl_<ROBOT_NODE_ID>"`
+- `CAN_NODE_ID = ROBOT_NODE_ID & 0x7F`
+- `CAN_BITRATE = 500000`
+- `CAN_NO_ACK_MODE = 1` (NO_ACK)
 
 ---
 
@@ -74,63 +98,55 @@ main/
 | 5 | 41 | J4 |
 | 6 | 42 | J5 / gripper |
 
-### Senzory (ADC map v konfiguraci)
+### CAN / TWAI
 
-| Sensor ID | ADC unit | ADC channel | GPIO |
-| --- | --- | --- | --- |
-| 0 | 1 | 3 | IO4 |
-| 1 | 1 | 4 | IO5 |
-| 2 | 1 | 5 | IO6 |
-| 3 | 1 | 6 | IO7 |
-| 4 | 1 | 7 | IO12 |
-| 5 | 2 | 6 | IO17 |
+- TX: `GPIO14`
+- RX: `GPIO13`
+- bitrate: `500 kbps`
 
-Poznamka:
-- V `main.c` je `sensors_init()` aktualne vypnute.
-- Web telemetrie proto pouziva odhadnute kloubove uhly (`robot_get_est_angle`), ne live ADC.
+### Senzory (ADC mapa v konfiguraci)
+
+Mapa ADC je pripravena pro 6 senzoru, ale default build bezi v sensorless rezimu:
+
+- `SENSOR_COUNT = 0`
+- `sensors_init()` se v `main.c` vola jen kdyz `SENSOR_COUNT > 0`
+- WebSocket telemetrie posila aktualne odhadnute uhly kloubu (`robot_get_est_angle`)
 
 ### Onboard RGB LED
 
 - WS2812 data pin: `GPIO38` (`STATUS_LED_WS2812_GPIO`)
-- Stavy LED:
 - `DISARMED` = cervena
-- `ARMED` = zelena
-- `OPERATING` = oranzova blikani
+- `READY/UNREFERENCED` = zelena
+- `RUNNING` = oranzova blikani
 
 ---
 
 ## Robot stavy a bezpecnost
 
-- `disarm` vypne PWM vystupy a zahodi frontu pohybu.
-- `arm` znovu povoli rizeni pohybu.
+- `disarm` vypne PWM vystupy, zastavi program, zahodi reference.
+- `arm` znovu povoli pohyb a vymaze error stav.
 - Prikazy `joint` a `move` jsou blokovane, kdyz je robot disarmed.
-- `move` pracuje ve WORK souradnicich a vyzaduje referenci.
-- Referenci nastavuje `home` (po dokonceni HOME segmentu).
+- `move` pracuje ve WORK souradnicich.
+- `home` frontuje HOME segment; reference se nastavi az po jeho dokonceni.
 
-Stav vraceny pres WS:
+Aktualni systemove stavy (`robot_get_system_state_name()`):
+
 - `DISARMED`
-- `OPERATING`
 - `UNREFERENCED`
-- `POSE_UNKNOWN`
-- `IDLE`
-
----
-
-## Aktualni omezeni
-
-- `move <x y z [pitch]>` aktualne pouziva simple planarni IK; pitch je zatim metadata a neni plne resen v IK.
-- `sensors_init()` je v `main.c` vypnute, takze system bezi defaultne v sensorless rezimu (web ukazuje odhadnute uhly).
+- `READY`
+- `RUNNING`
+- `READY_FOR_SYNC`
+- `ERROR`
 
 ---
 
 ## Konzole (UART REPL)
 
-Konzole bezi pres `esp_console` REPL:
+Konzole bezi pres `esp_console`:
 
-- prompt `>`
-- historie prikazu: 5 polozek
-- editace radku + sipky (linenoise)
-- logy jsou tisknute tak, aby nerozbily rozepsany radek
+- prompt: `>>`
+- historie prikazu: `1`
+- `linenoise` je v dumb mode (`linenoiseSetDumbMode(1)`)
 
 ### Dostupne prikazy
 
@@ -146,29 +162,41 @@ Konzole bezi pres `esp_console` REPL:
 - `gcode stop`
 - `gcode reset`
 - `gcode sync`
+- `can up`
+- `can status`
+- `can hb`
+- `can probe [count] [gap_ms]`
+- `can tx <id> [b0 ... b7]`
+- `can recover`
 - `ls`
 - `print <path>`
 - `tasks`
 - `stats`
 - `test`
-- `sensors` (ADC; ma smysl az pri zapnutem `sensors_init()`)
+- `sensors`
+
+Poznamka k `move`: kdyz nezadas `pitch`, CLI zkusi automaticky najit nejblizsi validni pitch pro IK.
 
 ---
 
 ## Wi-Fi a web
 
-SoftAP default:
+SoftAP default (pokud v NVS neni ulozena jina konfigurace):
 
-- SSID: `RoboControl`
+- SSID: `RoboControl_<node_id>` (napr. `RoboControl_2`)
 - heslo: `Robo-Control123`
 - mDNS: `http://robo-control.local/`
-- fallback IP: typicky `http://192.168.4.1/` (default AP IP ESP-IDF)
+- fallback IP: obvykle `http://192.168.4.1/`
 
 HTTP endpointy:
 
-- `GET /` -> hlavni stranka (`spage.html`)
-- `GET /settings` -> settings stranka
+- `GET /` -> `spage.html`
+- `GET /settings` -> `settings.html`
 - `GET /status` -> `{ "online": true/false }`
+- `GET /web/style.css`
+- `GET /web/app.js`
+- `GET /web/robocontrol.ico`
+- `GET /favicon.ico`
 - `POST /wifi_reset`
 - `GET|POST /wifi_config`
 - `GET /api/limits`
@@ -195,50 +223,86 @@ HTTP endpointy:
 - `{"cmd":"run_gcode","filename":"test.gcode"}`
 - `{"cmd":"gcode_stop"}`
 
-### Telemetrie server -> klient (periodicky)
+### Telemetrie server -> klient
 
-Posila se cca kazdych 200 ms:
+Broadcast perioda je cca `200 ms`.
 
 ```json
 {
-  "state": "IDLE",
+  "state": "READY",
+  "can_node_id": 2,
   "armed": true,
   "referenced": true,
   "tcp_est_valid": true,
-  "work_offset": { "x": 0, "y": 0, "z": 0 },
-  "tcp_work": { "x": 0, "y": 0, "z": 0, "pitch": 0 },
+  "work_offset": { "x": 106.0, "y": 0.0, "z": 114.3 },
+  "tcp_work": { "x": 0.0, "y": 0.0, "z": 0.0, "pitch": 20.0 },
   "sensors": [{ "id": 0, "angle": 75.0 }]
 }
 ```
 
 ---
 
-## G-code (aktualne podporovana podmnozina)
+## CAN/TWAI protokol
+
+Default adresace (11-bit standard ID):
+
+- command ID: `CAN_CMD_ID_BASE + node` -> `0x100 + node`
+- broadcast command ID: `0x17F`
+- response ID: `CAN_RESP_ID_BASE + node` -> `0x180 + node`
+- status/heartbeat ID: `CAN_STATUS_ID_BASE + node` -> `0x700 + node`
+
+Podporovane command kody:
+
+- `0x01 GET_STATUS`
+- `0x02 ARM`
+- `0x03 DISARM`
+- `0x04 HOME`
+- `0x05 STOP`
+- `0x10 UPLOAD_BEGIN` (slot + size)
+- `0x11 UPLOAD_DATA` (seq + payload)
+- `0x12 UPLOAD_END`
+- `0x13 PROGRAM_RUN`
+- `0x14 PROGRAM_DELETE`
+- `0x20 PREPARE`
+- `0x21 SYNC_START`
+
+Program sloty:
+
+- pocet slotu: `CAN_PROGRAM_SLOT_COUNT = 4`
+- ulozeni: `/spiffs/data/can_slot_<slot>.gcode`
+- status frame perioda: `CAN_STATUS_PERIOD_MS = 500`
+
+---
+
+## G-code (podporovana podmnozina)
 
 Parser umi:
 
 - `G0`, `G1`
+- `G4` (`P` v ms nebo `S` v sekundach)
 - `G90`, `G91`
 - `G20`, `G21`
-- `F`, `X`, `Y`, `Z`, `P`
+- `M2`, `M30` (stop programu)
+- `M10` (gripper open), `M11` (gripper close), `M280 S<deg>` (gripper angle)
+- slova `F`, `X`, `Y`, `Z`, `P`, `S`
 - komentare za `;`
 
 Dulezite:
 
 - G-code bezi ve WORK souradnicich.
-- Pred spustenim musi byt robot referencovany (`home`) a mit znamou TCP pozici.
-- Pri chybe dosahu nebo timeoutu se fronta flushne a beh se zastavi.
+- Pred spustenim musi byt robot referencovany (`home`) a musi mit znamou TCP pozici.
+- Pri chybe dosahu, timeoutu nebo parser error se fronta flushne a beh se zastavi.
 
 ---
 
 ## File manager (SPIFFS)
 
-- Datovy adresar: `/spiffs/data`
-- Povoleny upload/extenze: `.txt`, `.gcode`
-- `GET /files` vraci seznam souboru a velikosti
+- datovy adresar: `/spiffs/data`
+- `GET /files` vraci seznam (`name`, `size`)
 - `GET /file/<name>` vraci obsah
-- `PUT /file/<name>` ulozi soubor
+- `PUT /file/<name>` ulozi soubor (`.txt` nebo `.gcode`)
 - `DELETE /file/<name>` smaze soubor
+- `POST /upload` je legacy endpoint, uklada obsah do `/spiffs/data/gcode_file.gcode`
 
 ---
 
@@ -259,7 +323,15 @@ Projekt obsahuje:
 - `diagram.json`
 - `wokwi.toml`
 
-V simulaci je pouzita deska `board-esp32-s3-devkitc-1` a stejne pin mapovani jako v `config.h`.
+V simulaci je pouzita deska `board-esp32-s3-devkitc-1` se stejnym pin mapovanim jako v `config.h`.
+
+---
+
+## Aktualni omezeni
+
+- Default build je sensorless (`SENSOR_COUNT=0`), telemetrie proto pouziva odhadnute uhly.
+- WebSocket `move_xyz` nepouziva auto pitch scan (ten je pouze v CLI prikazu `move`).
+- CAN je v defaultu v NO_ACK rezimu (`CAN_NO_ACK_MODE=1`) vhodnem hlavne pro bring-up/lab setup.
 
 ---
 
