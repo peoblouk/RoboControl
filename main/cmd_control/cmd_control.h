@@ -4,6 +4,11 @@
 
 #ifndef CMD_CONTROL_H
 #define CMD_CONTROL_H
+
+// ===============================
+// Dependencies
+// ===============================
+
 #include "config.h"   // Configuration
 
 #include <stdio.h>
@@ -26,8 +31,10 @@
 #include "freertos/task.h"
 
 // ===============================
-// FUNCTION PROTOTYPES
+// Public API
 // ===============================
+
+/** @brief Start CLI/console command control task (REPL command registration). */
 void cmd_control_start(void);
 
 #endif // CMD_CONTROL_H
