@@ -550,7 +550,7 @@ static int cmd_test(int argc, char **argv)
     const float DX = 40.0f;
     const float DY = 40.0f;
     const float DZ = 40.0f;
-    // const float DP = 20.0f;   // kept for later TCP / pitch tests
+    const float DP = 20.0f;
     const TickType_t W = pdMS_TO_TICKS(2500);
 
     ok &= robot_cmd_move_xyz_work(X0, Y0, ZS, P0); vTaskDelay(W);
@@ -563,9 +563,8 @@ static int cmd_test(int argc, char **argv)
     ok &= robot_cmd_move_xyz_work(X0, Y0+DY, Z0,  P0); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0-DY, Z0,  P0); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0,    Z0,  P0); vTaskDelay(W);
-    // Optional pitch sweep in test sequence (kept disabled by default)
-    // ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, +DP); vTaskDelay(W);
-    // ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, -DP); vTaskDelay(W);
+    ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, +DP); vTaskDelay(W);
+    ok &= robot_cmd_move_xyz_work(X0, Y0, Z0, -DP); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0, Z0,  P0); vTaskDelay(W);
     ok &= robot_cmd_move_xyz_work(X0, Y0, ZS, P0); vTaskDelay(W);
 

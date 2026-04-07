@@ -81,6 +81,7 @@ static robot_pose_t s_tcp_est_base = {
     .pitch_deg = ROBOT_HOME_PITCH_DEG_DEFAULT,
 };
 static const float s_home_q_init[SERVO_COUNT] = HOME_Q_INIT;
+static const float s_home_pre_q_init[SERVO_COUNT] = HOME_PRE_Q_INIT;
 
 static float s_work_offset_xyz[3] = {
     ROBOT_WORK_OFFSET_X_DEFAULT,
@@ -510,13 +511,20 @@ void servo_set_angle(int servo_id, float angle)
     portEXIT_CRITICAL(&s_state_mux);
 }
 
+static void seed_last_q_from_pose(const float q_seed[SERVO_COUNT])
+{
+    float q[SERVO_COUNT];
+    for (int i = 0; i < SERVO_COUNT; i++) q[i] = q_seed[i];
+    robot_validate_and_prepare_q(q, true);
+
+    portENTER_CRITICAL(&s_state_mux);
+    for (int i = 0; i < SERVO_COUNT; i++) s_last_q[i] = q[i];
+    portEXIT_CRITICAL(&s_state_mux);
+}
+
 static void seed_last_q_from_home(void)
 {
-    for (int i = 0; i < SERVO_COUNT; i++) {
-        s_last_q[i] = s_home_q_init[i];
-    }
-
-    robot_validate_and_prepare_q(s_last_q, true);
+    seed_last_q_from_pose(s_home_q_init);
 }
 
 void joint_set_angle(int joint_id, float angle)
@@ -1126,13 +1134,22 @@ bool robot_cmd_home_reference(void)
 {
     if (!s_armed || s_robot_queue == NULL) return false;
 
+    const bool blind_recovery = !robot_is_referenced() || !robot_has_tcp_estimate();
+
     robot_stop_all();
 
-    bool ok = robot_cmd_move_joints_home(s_home_q_init,
-                                         ROBOT_HOME_X_BASE_DEFAULT,
-                                         ROBOT_HOME_Y_BASE_DEFAULT,
-                                         ROBOT_HOME_Z_BASE_DEFAULT,
-                                         ROBOT_HOME_PITCH_DEG_DEFAULT);
+    if (blind_recovery) {
+        seed_last_q_from_pose(s_home_pre_q_init);
+    }
+
+    bool ok = robot_cmd_move_joints_t(s_home_pre_q_init, HOME_PREMOVE_T_S, 0);
+    if (ok) {
+        ok = robot_cmd_move_joints_home(s_home_q_init,
+                                        ROBOT_HOME_X_BASE_DEFAULT,
+                                        ROBOT_HOME_Y_BASE_DEFAULT,
+                                        ROBOT_HOME_Z_BASE_DEFAULT,
+                                        ROBOT_HOME_PITCH_DEG_DEFAULT);
+    }
     if (ok) {
         robot_clear_error();
     } else {

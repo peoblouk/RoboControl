@@ -120,6 +120,14 @@
 
 #define J1_B_TRIM_DEG   -0.5f
 
+#define NODE_HOME_J0 75
+#define NODE_HOME_J1 60
+#define NODE_HOME_J2 60
+#define NODE_HOME_J3 65
+#define NODE_HOME_J4 154
+#define NODE_HOME_J5 96
+#define NODE_HOME_J6 90
+
 #elif ROBOT_NODE_ID == 2
 // NODE 2
 #define SERVO0_MIN_US  700
@@ -143,12 +151,12 @@
 #define SERVO6_MIN_US  720
 #define SERVO6_MAX_US  2000
 
-#define SERVO0_OFF_DEG  75.0f
+#define SERVO0_OFF_DEG  90.0f
 #define SERVO1_OFF_DEG  175.0f
 #define SERVO2_OFF_DEG  175.0f
 #define SERVO3_OFF_DEG  149.0f
 #define SERVO4_OFF_DEG  70.0f
-#define SERVO5_OFF_DEG  98.0f
+#define SERVO5_OFF_DEG  77.0f
 #define SERVO6_OFF_DEG  0.0f
 
 #define SERVO0_DIR      +1.0f
@@ -161,8 +169,16 @@
 
 #define J1_B_TRIM_DEG   -0.5f
 
+#define NODE_HOME_J0 95
+#define NODE_HOME_J1 60
+#define NODE_HOME_J2 60
+#define NODE_HOME_J3 65
+#define NODE_HOME_J4 154
+#define NODE_HOME_J5 75
+#define NODE_HOME_J6 90
+
 #else
-#error "Calibration profile for this ROBOT_NODE_ID is not defined (supported: 1, 2)"
+#error "Calibration profile for this ROBOT_NODE_ID is not defined"
 #endif
 
 #define SERVO_PWM_RANGES_INIT { \
@@ -216,13 +232,13 @@
 // ===============================
 // ROBOT: ARM GEOMETRY (mm)
 // ===============================
-#define L0 81.9f            //75.5f // height of J0 above the base
-#define J1_X_OFFSET  18.2f  // offset from J0 to the vertical plane of J1
-#define L1 115.9f // #define L1  116.0f //  107.5f 
-#define L2 79.4f  // #define L2   79.5f //   74.5f 
-#define L3   58.8f          // J3 -> J4
-#define L4_OPEN   70.0f     // J4 -> gripper closed (90 degree)
-#define L4_CLOSED 54.6f     // J4 -> gripper open (0 degree)
+#define L0 81.9f                //75.5f // height of J0 above the base
+#define J1_X_OFFSET  18.2f      // offset from J0 to the vertical plane of J1
+#define L1 115.9f               // #define L1  116.0f //  107.5f 
+#define L2 79.4f                // #define L2   79.5f //   74.5f 
+#define L3   58.8f              // J3 -> J4
+#define L4_OPEN   70.0f         // J4 -> gripper closed (90 degree)
+#define L4_CLOSED 54.6f         // J4 -> gripper open (0 degree)
 
 // Tool length [mm]
 #define L_TOOL_OPEN   (L3 + L4_OPEN)    // 128.8 mm
@@ -311,7 +327,7 @@
 #define RAPID_MM_S  200.0f
 #define MIN_V_MM_S  1.0f
 
-// Gripper defaults for M10/M11 (adjust per real tool mechanics)
+// Gripper defaults for M10/M11
 #define GRIPPER_OPEN_DEG   90.0f
 #define GRIPPER_CLOSE_DEG  0.0f
 #define GRIPPER_MOVE_T_S   0.30f
@@ -352,23 +368,29 @@
 // ===============================
 // Robot Positions
 // ===============================
-#define HOME_J0 75
-#define HOME_J1 60
-#define HOME_J2 60
-#define HOME_J3 65 
-#define HOME_J4 154
-#define HOME_J5 96
-#define HOME_J6 90
-
 #define HOME_Q_INIT { \
-    HOME_J0, \
-    HOME_J1, \
-    (HOME_J2 + J1_B_TRIM_DEG), \
-    HOME_J3, \
-    HOME_J4, \
-    HOME_J5, \
-    HOME_J6 \
+    NODE_HOME_J0, \
+    NODE_HOME_J1, \
+    (NODE_HOME_J2 + J1_B_TRIM_DEG), \
+    NODE_HOME_J3, \
+    NODE_HOME_J4, \
+    NODE_HOME_J5, \
+    NODE_HOME_J6 \
 }
+
+// Blind recovery pose used before HOME, mainly after DISARM when the arm can sag.
+// Keep this close to HOME, but high enough that the gripper clears the floor.
+#define HOME_PRE_Q_INIT { \
+    NODE_HOME_J0, \
+    40.0f, \
+    (40.0f + J1_B_TRIM_DEG), \
+    58.0f, \
+    143.0f, \
+    NODE_HOME_J5, \
+    NODE_HOME_J6 \
+}
+
+#define HOME_PREMOVE_T_S 0.90f
 
 // ===============================
 // ROBOT: SENSORLESS / REFERENCE
@@ -384,24 +406,5 @@
 #define ROBOT_WORK_OFFSET_X_DEFAULT ROBOT_HOME_X_BASE_DEFAULT
 #define ROBOT_WORK_OFFSET_Y_DEFAULT ROBOT_HOME_Y_BASE_DEFAULT
 #define ROBOT_WORK_OFFSET_Z_DEFAULT ROBOT_HOME_Z_BASE_DEFAULT
-
-// // withouth tool
-// #define ROBOT_WORK_OFFSET_X_DEFAULT 140.0f
-// #define ROBOT_WORK_OFFSET_Y_DEFAULT   0.0f
-// #define ROBOT_WORK_OFFSET_Z_DEFAULT  25.0f
-
-// #define ROBOT_HOME_X_BASE_DEFAULT   140.0f
-// #define ROBOT_HOME_Y_BASE_DEFAULT     0.0f
-// #define ROBOT_HOME_Z_BASE_DEFAULT    80.0f
-
-// // with tool
-// #define ROBOT_WORK_OFFSET_X_DEFAULT 220.0f
-// #define ROBOT_WORK_OFFSET_Y_DEFAULT 0.0f
-// #define ROBOT_WORK_OFFSET_Z_DEFAULT 25.0f
-
-// #define ROBOT_HOME_X_BASE_DEFAULT   220.0f
-// #define ROBOT_HOME_Y_BASE_DEFAULT   0.0f
-// #define ROBOT_HOME_Z_BASE_DEFAULT   80.0f
-// #define ROBOT_HOME_PITCH_DEG_DEFAULT 0.0f
 
 #endif // CONFIG_H
