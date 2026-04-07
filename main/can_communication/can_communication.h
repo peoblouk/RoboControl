@@ -44,6 +44,23 @@ typedef enum {
     CAN_CMD_JOG_Z          = 0x23, ///< Manual jog in Z axis.
 } can_command_id_t;
 
+/** @brief Telemetry/info frame kinds sent on `CAN_INFO_ID_BASE + node_id`. */
+typedef enum {
+    CAN_INFO_WORK_OFFSET = 0x01, ///< Current work offset XYZ in 0.1 mm.
+    CAN_INFO_TCP_WORK_XYZ = 0x02, ///< Current TCP estimate in work frame, 0.1 mm.
+    CAN_INFO_TCP_META = 0x03, ///< Metadata for the accompanying value frames.
+    CAN_INFO_VALUES_0_2 = 0x10, ///< Values 0..2 in 0.1 deg.
+    CAN_INFO_VALUES_3_5 = 0x11, ///< Values 3..5 in 0.1 deg.
+} can_info_frame_kind_t;
+
+/** @brief Source used for `CAN_INFO_VALUES_*` telemetry values. */
+typedef enum {
+    CAN_INFO_SOURCE_EST_JOINTS = 0x00, ///< Estimated joint angles from the controller.
+    CAN_INFO_SOURCE_ADC_SENSORS = 0x01, ///< Angles read from ADC sensors.
+} can_info_value_source_t;
+
+#define CAN_INFO_VALUE_INVALID_I16 ((int16_t)0x7FFF)
+
 /** @brief Protocol-level command handling result codes. */
 typedef enum {
     CAN_PROTO_OK                 = 0x00, ///< Command accepted and processed.

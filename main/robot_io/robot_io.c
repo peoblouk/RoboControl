@@ -687,7 +687,7 @@ bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
     const float r_j1 = planar_radius_from_j1(x, y);
     const float tool_len_cfg = ROBOT_TCP_IK_TOOL_LEN_MM;
     const float tool_len = (isfinite(tool_len_cfg) && tool_len_cfg > 0.0f) ? tool_len_cfg : 0.0f;
-    const float pitch_signs[2] = { -1.0f, +1.0f };
+    const float pitch_signs[2] = { +1.0f, -1.0f };
 
     for (int i = 0; i < 2; i++) {
         const float phi = tcp_ik_pitch_rad(pitch_deg, pitch_signs[i]);
@@ -758,7 +758,8 @@ static bool inverse_kinematics_tcp(float x, float y, float z,
 
     const float tool_len_cfg = ROBOT_TCP_IK_TOOL_LEN_MM;
     const float tool_len = (isfinite(tool_len_cfg) && tool_len_cfg > 0.0f) ? tool_len_cfg : 0.0f;
-    const float pitch_signs[2] = { -1.0f, +1.0f };
+    // Try the commanded pitch sign first, then the mirrored fallback.
+    const float pitch_signs[2] = { +1.0f, -1.0f };
 
     float best_q[SERVO_COUNT];
     float best_cost = 1e30f;

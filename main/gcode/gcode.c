@@ -110,14 +110,34 @@ static float compute_move_duration_s(float x0, float y0, float z0,
     return dist / v_mm_s;
 }
 
+static TickType_t timeout_from_duration_s(float duration_s, float min_timeout_s, float extra_timeout_s)
+{
+    if (!isfinite(duration_s) || duration_s < 0.0f) duration_s = 0.0f;
+    float timeout_s = duration_s + extra_timeout_s;
+    if (timeout_s < min_timeout_s) timeout_s = min_timeout_s;
+
+    uint32_t timeout_ms = (uint32_t)lroundf(timeout_s * 1000.0f);
+    TickType_t timeout = pdMS_TO_TICKS(timeout_ms);
+    return (timeout > 0) ? timeout : 1;
+}
+
 static bool send_xyz_blocking(float x, float y, float z, float pitch_deg, float duration_s, TickType_t timeout)
 {
     TickType_t t0 = xTaskGetTickCount();
 
     while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
         if (robot_cmd_move_xyz_work_t(x, y, z, pitch_deg, duration_s, 0)) {
-            vTaskDelay(pdMS_TO_TICKS(60));
-            return true;
+            const TickType_t settle = pdMS_TO_TICKS(60);
+            const TickType_t t_cmd = xTaskGetTickCount();
+
+            vTaskDelay(settle);
+            while (!s_stop && (xTaskGetTickCount() - t_cmd) < timeout) {
+                if (!robot_is_operating()) {
+                    return true;
+                }
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            return false;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -131,7 +151,17 @@ static bool send_dwell_blocking(uint32_t dwell_ms, TickType_t timeout)
 
     while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
         if (robot_cmd_dwell_ms(dwell_ms, 0)) {
-            return true;
+            const TickType_t settle = pdMS_TO_TICKS(20);
+            const TickType_t t_cmd = xTaskGetTickCount();
+
+            vTaskDelay(settle);
+            while (!s_stop && (xTaskGetTickCount() - t_cmd) < timeout) {
+                if (!robot_is_operating()) {
+                    return true;
+                }
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            return false;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -145,7 +175,17 @@ static bool send_gripper_blocking(float gripper_deg, TickType_t timeout)
 
     while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
         if (robot_cmd_gripper_set(gripper_deg, 0)) {
-            return true;
+            const TickType_t settle = pdMS_TO_TICKS(20);
+            const TickType_t t_cmd = xTaskGetTickCount();
+
+            vTaskDelay(settle);
+            while (!s_stop && (xTaskGetTickCount() - t_cmd) < timeout) {
+                if (!robot_is_operating()) {
+                    return true;
+                }
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            return false;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -205,6 +245,7 @@ bool gcode_push_line(const char *line_in)
 
         if (mi == 10) {
             if (!send_gripper_blocking(GRIPPER_OPEN_DEG, pdMS_TO_TICKS(5000))) {
+                if (s_error || s_stop) return false;
                 return gcode_abort("Queue timeout sending GRIPPER OPEN");
             }
             return true;
@@ -212,6 +253,7 @@ bool gcode_push_line(const char *line_in)
 
         if (mi == 11) {
             if (!send_gripper_blocking(GRIPPER_CLOSE_DEG, pdMS_TO_TICKS(5000))) {
+                if (s_error || s_stop) return false;
                 return gcode_abort("Queue timeout sending GRIPPER CLOSE");
             }
             return true;
@@ -222,6 +264,7 @@ bool gcode_push_line(const char *line_in)
                 return gcode_abort("M280 requires S (gripper angle in degrees).");
             }
             if (!send_gripper_blocking(s, pdMS_TO_TICKS(5000))) {
+                if (s_error || s_stop) return false;
                 return gcode_abort("Queue timeout sending GRIPPER S-angle");
             }
             return true;
@@ -248,7 +291,9 @@ bool gcode_push_line(const char *line_in)
         if (dwell_ms < 0.0f) return gcode_abort("G4 dwell must be non-negative.");
         if (dwell_ms < 0.5f) return true;
 
-        if (!send_dwell_blocking((uint32_t)lroundf(dwell_ms), pdMS_TO_TICKS(8000))) {
+        TickType_t dwell_timeout = timeout_from_duration_s(dwell_ms / 1000.0f, 8.0f, 2.0f);
+        if (!send_dwell_blocking((uint32_t)lroundf(dwell_ms), dwell_timeout)) {
+            if (s_error || s_stop) return false;
             return gcode_abort("Queue timeout sending DWELL");
         }
         return true;
@@ -282,7 +327,9 @@ bool gcode_push_line(const char *line_in)
         const float v_mm_s = (gi == 0) ? RAPID_MM_S : st.feed_mm_s;
         const float duration_s = compute_move_duration_s(st.x, st.y, st.z, tx, ty, tz, v_mm_s);
 
-        if (!send_xyz_blocking(tx, ty, tz, pitch_deg, duration_s, pdMS_TO_TICKS(8000))) {
+        TickType_t move_timeout = timeout_from_duration_s(duration_s, 8.0f, 8.0f);
+        if (!send_xyz_blocking(tx, ty, tz, pitch_deg, duration_s, move_timeout)) {
+            if (s_error || s_stop) return false;
             return gcode_abort("Queue timeout sending WORK XYZ");
         }
 

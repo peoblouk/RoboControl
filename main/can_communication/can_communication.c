@@ -5,6 +5,7 @@
 #include "can_communication.h"
 
 #include <errno.h>
+//#include <limits.h>
 #include <sys/stat.h>
 
 static const char *TAG = "can";
@@ -47,6 +48,8 @@ static can_upload_session_t s_upload = {0};
 static int s_prepared_slot = -1;
 static int s_active_slot = -1;
 
+static esp_err_t can_send_status_frame_internal(void);
+
 static uint8_t can_slot_to_wire(int slot)
 {
     return (slot >= 0 && slot < CAN_PROGRAM_SLOT_COUNT) ? (uint8_t)slot : 0xFFU;
@@ -56,6 +59,23 @@ static int16_t can_decode_i16_le(const uint8_t *data)
     if (data == NULL) return 0;
     uint16_t raw = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
     return (int16_t)raw;
+}
+
+static void can_encode_i16_le(uint8_t *dst, int16_t value)
+{
+    if (dst == NULL) return;
+    dst[0] = (uint8_t)(value & 0xFF);
+    dst[1] = (uint8_t)(((uint16_t)value >> 8) & 0xFF);
+}
+
+static int16_t can_quantize_tenths(float value)
+{
+    if (!isfinite(value)) return CAN_INFO_VALUE_INVALID_I16;
+
+    float scaled = value * 10.0f;
+    if (scaled > (float)INT16_MAX) return INT16_MAX;
+    if (scaled < (float)INT16_MIN) return INT16_MIN;
+    return (int16_t)lroundf(scaled);
 }
 
 static void can_set_last_protocol_error(can_protocol_result_t code)
@@ -315,6 +335,98 @@ static esp_err_t can_send_response(uint8_t cmd,
     return can_send_raw(CAN_RESP_ID_BASE + (CAN_NODE_ID & 0x7FU), data, sizeof(data));
 }
 
+static esp_err_t can_send_info_frame(uint8_t kind, const uint8_t *payload, uint8_t payload_len)
+{
+    if (payload_len > 7U) return ESP_ERR_INVALID_ARG;
+
+    uint8_t data[8] = {0};
+    data[0] = kind;
+    if (payload_len > 0U && payload != NULL) {
+        memcpy(&data[1], payload, payload_len);
+    }
+
+    return can_send_raw(CAN_INFO_ID_BASE + (CAN_NODE_ID & 0x7FU), data, (uint8_t)(payload_len + 1U));
+}
+
+static esp_err_t can_send_info_work_offset_frame(void)
+{
+    uint8_t payload[6] = {0};
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+
+    robot_get_work_offset(&x, &y, &z);
+    can_encode_i16_le(&payload[0], can_quantize_tenths(x));
+    can_encode_i16_le(&payload[2], can_quantize_tenths(y));
+    can_encode_i16_le(&payload[4], can_quantize_tenths(z));
+    return can_send_info_frame(CAN_INFO_WORK_OFFSET, payload, sizeof(payload));
+}
+
+static uint8_t can_fill_info_values(int16_t values[6], can_info_value_source_t *out_source)
+{
+    for (size_t i = 0; i < 6U; i++) {
+        values[i] = CAN_INFO_VALUE_INVALID_I16;
+    }
+
+    const bool use_adc_sensors = (SENSOR_COUNT > 0) && robot_sensors_initialized();
+    if (out_source != NULL) {
+        *out_source = use_adc_sensors ? CAN_INFO_SOURCE_ADC_SENSORS : CAN_INFO_SOURCE_EST_JOINTS;
+    }
+
+    if (use_adc_sensors) {
+        const uint8_t count = (uint8_t)((SENSOR_COUNT < 6) ? SENSOR_COUNT : 6);
+        for (uint8_t i = 0; i < count; i++) {
+            values[i] = can_quantize_tenths(sensor_read_angle(i));
+        }
+        return count;
+    }
+
+    static const int joint_to_servo[6] = {
+        JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
+    };
+    const uint8_t count = (uint8_t)((JOINT_COUNT < 6) ? JOINT_COUNT : 6);
+    for (uint8_t i = 0; i < count; i++) {
+        values[i] = can_quantize_tenths(robot_get_est_angle(joint_to_servo[i]));
+    }
+    return count;
+}
+
+static esp_err_t can_send_info_sensor_frames(void)
+{
+    int16_t values[6] = {0};
+    can_info_value_source_t source = CAN_INFO_SOURCE_EST_JOINTS;
+    const uint8_t value_count = can_fill_info_values(values, &source);
+
+    uint8_t meta[7] = {0};
+    meta[3] = (uint8_t)source;
+    meta[4] = value_count;
+    esp_err_t err = can_send_info_frame(CAN_INFO_TCP_META, meta, sizeof(meta));
+    if (err != ESP_OK) return err;
+
+    uint8_t values_0_2[7] = {0};
+    can_encode_i16_le(&values_0_2[0], values[0]);
+    can_encode_i16_le(&values_0_2[2], values[1]);
+    can_encode_i16_le(&values_0_2[4], values[2]);
+    values_0_2[6] = value_count;
+    err = can_send_info_frame(CAN_INFO_VALUES_0_2, values_0_2, sizeof(values_0_2));
+    if (err != ESP_OK) return err;
+
+    uint8_t values_3_5[7] = {0};
+    can_encode_i16_le(&values_3_5[0], values[3]);
+    can_encode_i16_le(&values_3_5[2], values[4]);
+    can_encode_i16_le(&values_3_5[4], values[5]);
+    values_3_5[6] = value_count;
+    return can_send_info_frame(CAN_INFO_VALUES_3_5, values_3_5, sizeof(values_3_5));
+}
+
+static esp_err_t can_send_info_frames(void)
+{
+    esp_err_t err = can_send_info_work_offset_frame();
+    if (err != ESP_OK) return err;
+
+    return can_send_info_sensor_frames();
+}
+
 static esp_err_t can_send_status_frame_internal(void)
 {
     uint8_t data[8] = {0};
@@ -462,6 +574,7 @@ static void can_process_command_frame(const twai_message_t *msg)
                                     (uint8_t)robot_get_last_error(),
                                     (uint8_t)CAN_NODE_ID);
             (void)can_send_status_frame_internal();
+            (void)can_send_info_frames();
             return;
 
         case CAN_CMD_ARM:
@@ -900,14 +1013,16 @@ void can_init(void)
 
     s_can_started = true;
     ESP_LOGI(TAG,
-             "TWAI ready tx=%d rx=%d bitrate=%d mode=%s node=%u cmd_id=0x%03X resp_id=0x%03X",
+             "TWAI ready tx=%d rx=%d bitrate=%d mode=%s node=%u cmd_id=0x%03X resp_id=0x%03X status_id=0x%03X info_id=0x%03X",
              (int)CAN_TX_GPIO,
              (int)CAN_RX_GPIO,
              CAN_BITRATE,
              can_mode_str(),
              (unsigned)CAN_NODE_ID,
              (unsigned)(CAN_CMD_ID_BASE + (CAN_NODE_ID & 0x7FU)),
-             (unsigned)(CAN_RESP_ID_BASE + (CAN_NODE_ID & 0x7FU)));
+             (unsigned)(CAN_RESP_ID_BASE + (CAN_NODE_ID & 0x7FU)),
+             (unsigned)(CAN_STATUS_ID_BASE + (CAN_NODE_ID & 0x7FU)),
+             (unsigned)(CAN_INFO_ID_BASE + (CAN_NODE_ID & 0x7FU)));
 }
 
 void can_start(void)

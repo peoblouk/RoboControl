@@ -38,6 +38,7 @@
 #define CAN_CMD_ID_BROADCAST    0x17FU
 #define CAN_RESP_ID_BASE        0x180U
 #define CAN_STATUS_ID_BASE      0x700U
+#define CAN_INFO_ID_BASE        0x780U
 
 // Filepaths
 #define FS_DATA_BASE        "/spiffs/data"
@@ -63,7 +64,8 @@
 #define SERVO_J4      5
 #define SERVO_J5      6   // gripper
 
-#define ROBOT_DEFAULT_PITCH_DEG 20.0f
+// TCP pitch convention: negative = tool points downward in the X-Z plane.
+#define ROBOT_DEFAULT_PITCH_DEG -53.0f
 
 // Joint -> master servo mapping
 #define JOINT0_SERVO  SERVO_J0
@@ -378,8 +380,6 @@
     NODE_HOME_J6 \
 }
 
-// Blind recovery pose used before HOME, mainly after DISARM when the arm can sag.
-// Keep this close to HOME, but high enough that the gripper clears the floor.
 #define HOME_PRE_Q_INIT { \
     NODE_HOME_J0, \
     40.0f, \
@@ -397,10 +397,10 @@
 // ===============================
 // SENSOR_COUNT = 0 => sensorless mode
 
-#define ROBOT_HOME_X_BASE_DEFAULT     106.0f
+#define ROBOT_HOME_X_BASE_DEFAULT     108.0f
 #define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
-#define ROBOT_HOME_Z_BASE_DEFAULT     114.3f
-#define ROBOT_HOME_PITCH_DEG_DEFAULT    20.0f
+#define ROBOT_HOME_Z_BASE_DEFAULT     116.0f
+#define ROBOT_HOME_PITCH_DEG_DEFAULT   -53.0f
 
 // Default WORK offset = HOME TCP in BASE.
 #define ROBOT_WORK_OFFSET_X_DEFAULT ROBOT_HOME_X_BASE_DEFAULT

@@ -13,7 +13,7 @@ const jointEditUntil = Array(6).fill(0);
 
 const PITCH_MIN = -90;
 const PITCH_MAX = 90;
-const PITCH_DEFAULT = 20;
+const PITCH_DEFAULT = -53;
 const XYZ_AXES = ["x", "y", "z"];
 const MEAS_X_FIXED_Z = 90;
 const MEAS_Y_FIXED_X = 100;
