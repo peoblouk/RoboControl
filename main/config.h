@@ -14,7 +14,7 @@
 // ===============================
 // NODE PROFILE
 // ===============================
-#define ROBOT_NODE_ID 2 // Unique ID
+#define ROBOT_NODE_ID 1 // Unique ID
 
 #if (ROBOT_NODE_ID < 1) || (ROBOT_NODE_ID > 127)
 #error "ROBOT_NODE_ID must be in range 1..127"
@@ -247,8 +247,8 @@
 #define L_TOOL_CLOSED (L3 + L4_CLOSED)  // 113.4 mm
 
 
-// TCP tool length used by IK [mm]
-#define ROBOT_TCP_IK_TOOL_LEN_MM L_TOOL_OPEN
+// TCP tool length used by IK
+#define ROBOT_TOOL_LEN L_TOOL_OPEN
 
 // ===============================
 // ROBOT: JOINT LIMITS (deg / deg/s)

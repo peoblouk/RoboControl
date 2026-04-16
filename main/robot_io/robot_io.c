@@ -685,7 +685,7 @@ bool robot_validate_and_prepare_q(float q[SERVO_COUNT], bool clamp)
 bool robot_tcp_reachable(float x, float y, float z, float pitch_deg)
 {
     const float r_j1 = planar_radius_from_j1(x, y);
-    const float tool_len_cfg = ROBOT_TCP_IK_TOOL_LEN_MM;
+    const float tool_len_cfg = ROBOT_TOOL_LEN;
     const float tool_len = (isfinite(tool_len_cfg) && tool_len_cfg > 0.0f) ? tool_len_cfg : 0.0f;
     const float pitch_signs[2] = { +1.0f, -1.0f };
 
@@ -735,7 +735,7 @@ float robot_min_time_for_move(const float q0[SERVO_COUNT], const float q1[SERVO_
 // ===============================
 // INVERSE KINEMATICS
 // ===============================
-static bool inverse_kinematics_tcp(float x, float y, float z,
+static bool inverse_kinematics(float x, float y, float z,
                                    float tool_pitch_deg,
                                    float q_target[SERVO_COUNT])
 {
@@ -753,13 +753,12 @@ static bool inverse_kinematics_tcp(float x, float y, float z,
         q0 = (fabsf(d0) < 1e-6f) ? 0.0f
                                  : DEG2RAD((last_q[SERVO_J0] - OFF[SERVO_J0]) / d0);
     } else {
-        q0 = atan2f(y, x);
+        q0 = atan2f(y, x); // base angle
     }
 
-    const float tool_len_cfg = ROBOT_TCP_IK_TOOL_LEN_MM;
+    const float tool_len_cfg = ROBOT_TOOL_LEN;
     const float tool_len = (isfinite(tool_len_cfg) && tool_len_cfg > 0.0f) ? tool_len_cfg : 0.0f;
-    // Try the commanded pitch sign first, then the mirrored fallback.
-    const float pitch_signs[2] = { +1.0f, -1.0f };
+    const float pitch_signs[2] = { +1.0f, -1.0f }; // <-89..+89>
 
     float best_q[SERVO_COUNT];
     float best_cost = 1e30f;
@@ -778,7 +777,7 @@ static bool inverse_kinematics_tcp(float x, float y, float z,
         if (d > (L1 + L2)) continue;
         if (d < fabsf(L1 - L2)) continue;
 
-        float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f * L1 * L2);
+        float cos_q2 = (d2 - L1*L1 - L2*L2) / (2.0f * L1 * L2); // saturation <-1..1> due to numerical errors
         if (cos_q2 > 1.0f) cos_q2 = 1.0f;
         if (cos_q2 < -1.0f) cos_q2 = -1.0f;
 
@@ -786,10 +785,12 @@ static bool inverse_kinematics_tcp(float x, float y, float z,
 
         for (int b = 0; b < 2; b++) {
             const float q2 = q2_candidates[b];
-            const float phi2 = atan2f(z_sh, r_w);
+
+            const float phi2 = atan2f(z_sh, r_w); // 
             const float psi = atan2f(L2 * sinf(q2), L1 + L2 * cosf(q2));
             const float q1 = phi2 - psi;
-            const float q3_raw = phi - q1 - q2;
+
+            const float q3_raw = phi - q1 - q2; // q3 2*pi | find the best match  limits
 
             for (int k = -1; k <= 1; k++) {
                 const float q3 = q3_raw + (float)k * 2.0f * (float)M_PI;
@@ -832,7 +833,7 @@ static bool inverse_kinematics_tcp(float x, float y, float z,
 
 bool robot_ik_tcp(float x, float y, float z, float pitch_deg, float q_target[SERVO_COUNT])
 {
-    if (!inverse_kinematics_tcp(x, y, z, pitch_deg, q_target)) return false;
+    if (!inverse_kinematics(x, y, z, pitch_deg, q_target)) return false;
 
     robot_validate_and_prepare_q(q_target, true);
     return true;
@@ -910,22 +911,22 @@ static void robot_control_task(void *arg)
 
     for (;;) {
 
-        if (!s_armed) {
-            if (!disarmed_latched) {
-                seg_flush();
-                for (int i = 0; i < SERVO_COUNT; i++) {
-                    ledc_stop(LEDC_LOW_SPEED_MODE, servos[i].channel, 0);
+            if (!s_armed) {
+                if (!disarmed_latched) {
+                    seg_flush();
+                    for (int i = 0; i < SERVO_COUNT; i++) {
+                        ledc_stop(LEDC_LOW_SPEED_MODE, servos[i].channel, 0);
+                    }
+                    disarmed_latched = true;
                 }
-                disarmed_latched = true;
-            }
 
-            while (xQueueReceive(s_robot_queue, &cmd, 0) == pdTRUE) {
-            }
+                while (xQueueReceive(s_robot_queue, &cmd, 0) == pdTRUE) {
+                }
 
-            s_operating = false;
-            vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
-            continue;
-        }
+                s_operating = false;
+                vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
+                continue;
+            }
 
         disarmed_latched = false;
 
@@ -970,7 +971,7 @@ static void robot_control_task(void *arg)
                 ESP_LOGD(TAG, "IK TCP(base): x=%.1f y=%.1f z=%.1f pitch=%.1f",
                          cmd.x, cmd.y, cmd.z, pitch);
 
-                bool ok = inverse_kinematics_tcp(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
+                bool ok = inverse_kinematics(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
                 if (!ok) {
                     ESP_LOGE(TAG, "IK TCP failed for BASE x=%.1f y=%.1f z=%.1f pitch=%.1f",
                              cmd.x, cmd.y, cmd.z, pitch);
