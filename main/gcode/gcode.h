@@ -12,6 +12,7 @@
 #include "config.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,10 +36,50 @@ typedef struct {
     float pitch_deg; ///< Current tool pitch estimate [deg].
 } gcode_state_t;
 
+/** @brief High-level command kind produced by the G-code parser. */
+typedef enum {
+    GCMD_NONE = 0,   ///< Empty line or modal update without robot action.
+    GCMD_MOVE,       ///< G0/G1 motion command.
+    GCMD_DWELL,      ///< G4 dwell command.
+    GCMD_GRIPPER,    ///< M10/M11/M280 gripper command.
+    GCMD_STOP,       ///< M2/M30 stop program request.
+    GCMD_STATE,      ///< Modal state update only (G20/G21/G90/G91).
+} gcode_cmd_type_t;
+
+/** @brief Parsed command payload passed from parser to executor. */
+typedef struct {
+    gcode_cmd_type_t type;
+
+    float x;
+    float y;
+    float z;
+    float pitch_deg;
+    float duration_s;
+    bool is_rapid;
+
+    uint32_t dwell_ms;
+
+    float gripper_deg;
+} gcode_cmd_t;
+
 // ===============================
 // Public API
 // ===============================
 
+/**
+ * @brief Parse one G-code text line into an executable command.
+ *
+ * The parser updates modal state such as units/feed/absolute mode, but it does
+ * not send anything to the robot and does not block. Motion pose state is
+ * committed only after successful execution of the parsed command.
+ */
+bool gcode_parse_line(const char *line, gcode_cmd_t *cmd);
+/**
+ * @brief Execute one previously parsed G-code command.
+ *
+ * This function performs robot I/O and may block until the command completes.
+ */
+bool gcode_execute_cmd(const gcode_cmd_t *cmd);
 /** @brief Parse and execute one G-code text line. */
 bool gcode_push_line(const char *line);
 /** @brief Execute a G-code file line-by-line until completion or stop/error. */

@@ -73,6 +73,7 @@ static volatile bool s_referenced = false;
 static volatile bool s_tcp_estimate_is_valid = false;
 static volatile bool s_sync_ready = false;
 static volatile bool s_gcode_running = false;
+static volatile bool s_program_stop_requested = false;
 static volatile robot_error_t s_last_error = ROBOT_ERROR_NONE;
 static robot_pose_t s_tcp_est_base = {
     .x = ROBOT_HOME_X_BASE_DEFAULT,
@@ -185,6 +186,21 @@ bool robot_is_program_running(void)
     return running;
 }
 
+bool robot_is_program_stop_requested(void)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    bool requested = s_program_stop_requested;
+    portEXIT_CRITICAL(&s_state_mux);
+    return requested;
+}
+
+void robot_set_program_stop_requested(bool requested)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    s_program_stop_requested = requested;
+    portEXIT_CRITICAL(&s_state_mux);
+}
+
 robot_system_state_t robot_get_system_state(void)
 {
     portENTER_CRITICAL(&s_state_mux);
@@ -193,12 +209,14 @@ robot_system_state_t robot_get_system_state(void)
     const bool operating = s_operating;
     const bool sync_ready = s_sync_ready;
     const bool gcode_running = s_gcode_running;
+    const bool stop_requested = s_program_stop_requested;
     const robot_error_t last_error = s_last_error;
     portEXIT_CRITICAL(&s_state_mux);
 
     if (!armed) return ROBOT_STATE_DISARMED;
     if (last_error != ROBOT_ERROR_NONE) return ROBOT_STATE_ERROR;
     if (sync_ready) return ROBOT_STATE_READY_FOR_SYNC;
+    if (stop_requested && (operating || gcode_running)) return ROBOT_STATE_STOPPING;
     if (operating || gcode_running) return ROBOT_STATE_RUNNING;
     if (!referenced) return ROBOT_STATE_UNREFERENCED;
     return ROBOT_STATE_READY;
@@ -213,6 +231,7 @@ const char *robot_get_system_state_name(void)
         case ROBOT_STATE_RUNNING: return "RUNNING";
         case ROBOT_STATE_READY_FOR_SYNC: return "READY_FOR_SYNC";
         case ROBOT_STATE_ERROR: return "ERROR";
+        case ROBOT_STATE_STOPPING: return "STOPPING";
         default: return "UNKNOWN";
     }
 }
@@ -1349,6 +1368,7 @@ static void gcode_executor_task(void *arg)
     free(params);
     portENTER_CRITICAL(&s_state_mux);
     s_gcode_running = false;
+    s_program_stop_requested = false;
     portEXIT_CRITICAL(&s_state_mux);
     vTaskDelete(NULL);
 }
@@ -1371,6 +1391,7 @@ bool robot_core_run_gcode(const char *filename)
     robot_clear_error();
     portENTER_CRITICAL(&s_state_mux);
     s_gcode_running = true;
+    s_program_stop_requested = false;
     portEXIT_CRITICAL(&s_state_mux);
 
     BaseType_t res = xTaskCreatePinnedToCore(
@@ -1387,6 +1408,7 @@ bool robot_core_run_gcode(const char *filename)
         ESP_LOGE(TAG, "Failed to create G-code task");
         portENTER_CRITICAL(&s_state_mux);
         s_gcode_running = false;
+        s_program_stop_requested = false;
         portEXIT_CRITICAL(&s_state_mux);
         free(params);
         return false;

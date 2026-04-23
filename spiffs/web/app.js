@@ -86,7 +86,9 @@ function setRobotUI(state) {
   elText.textContent = label || "Unknown";
 
   if (state === "OPERATING" || state === "RUNNING") elDot.style.background = "#22c55e";
-  else if (state === "IDLE") elDot.style.background = "#fbbf24";
+  else if (state === "STOPPING") elDot.style.background = "#f59e0b";
+  else if (state === "READY" || state === "IDLE") elDot.style.background = "#fbbf24";
+  else if (state === "READY_FOR_SYNC") elDot.style.background = "#38bdf8";
   else if (state === "UNREFERENCED" || state === "POSE_UNKNOWN") elDot.style.background = "#f59e0b";
   else if (state === "DISARMED") elDot.style.background = "#ef4444";
   else if (state === "ALARM" || state === "ERROR" || state === "STOPPED") elDot.style.background = "#ef4444";
@@ -969,7 +971,7 @@ function stopRobot() {
     return;
   }
   ws.send(JSON.stringify({ cmd: "gcode_stop" }));
-  setRobotUI("STOPPED");
+  setRobotUI("STOPPING");
 }
 
 function saveWiFi() {

@@ -2,7 +2,6 @@
 version = 1
 firmware = 'build/flasher_args.json'
 elf = 'build/robocontrol.elf'
-vcdFile = 'twai-can.vcd'
 
 #firmware = 'build/robocontrol.bin'
 board = 'ESP32-S3'
@@ -15,6 +14,7 @@ board = 'ESP32-S3'
 'esp32s3:39' = 'servo:3'
 'esp32s3:40' = 'servo:4'
 'esp32s3:41' = 'servo:5'
+'esp32s3:42' = 'servo:6'
 
 # Potenciometry (ADC senzory úhlů)
 'esp32s3:4'  = 'pot:0'

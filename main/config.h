@@ -14,7 +14,7 @@
 // ===============================
 // NODE PROFILE
 // ===============================
-#define ROBOT_NODE_ID 1 // Unique ID
+#define ROBOT_NODE_ID 2 // Unique ID
 
 #if (ROBOT_NODE_ID < 1) || (ROBOT_NODE_ID > 127)
 #error "ROBOT_NODE_ID must be in range 1..127"
@@ -234,11 +234,11 @@
 // ===============================
 // ROBOT: ARM GEOMETRY (mm)
 // ===============================
-#define L0 81.9f                //75.5f // height of J0 above the base
-#define J1_X_OFFSET  18.2f      // offset from J0 to the vertical plane of J1
-#define L1 115.9f               // #define L1  116.0f //  107.5f 
-#define L2 79.4f                // #define L2   79.5f //   74.5f 
-#define L3   58.8f              // J3 -> J4
+#define L0 81.9f                // height of J0 above the base
+#define J1_X_OFFSET 18.2f       // offset from J0 to the vertical plane of J1
+#define L1 115.9f               // J1 -> J2
+#define L2 79.4f                // J2 -> J3
+#define L3 58.8f                // J3 -> J4
 #define L4_OPEN   70.0f         // J4 -> gripper closed (90 degree)
 #define L4_CLOSED 54.6f         // J4 -> gripper open (0 degree)
 
@@ -255,7 +255,7 @@
 // ===============================
 #define J0_MIN 0
 #define J0_MAX 180
-#define J0_V   60
+#define J0_V   90
 
 #define J1_MIN 0
 #define J1_MAX 180
@@ -403,8 +403,8 @@
 #define ROBOT_HOME_PITCH_DEG_DEFAULT   -53.0f
 
 // Default WORK offset = HOME TCP in BASE.
-#define ROBOT_WORK_OFFSET_X_DEFAULT ROBOT_HOME_X_BASE_DEFAULT
-#define ROBOT_WORK_OFFSET_Y_DEFAULT ROBOT_HOME_Y_BASE_DEFAULT
-#define ROBOT_WORK_OFFSET_Z_DEFAULT ROBOT_HOME_Z_BASE_DEFAULT
+#define ROBOT_WORK_OFFSET_X_DEFAULT 0//ROBOT_HOME_X_BASE_DEFAULT
+#define ROBOT_WORK_OFFSET_Y_DEFAULT 0//ROBOT_HOME_Y_BASE_DEFAULT
+#define ROBOT_WORK_OFFSET_Z_DEFAULT 0//ROBOT_HOME_Z_BASE_DEFAULT
 
 #endif // CONFIG_H

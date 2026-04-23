@@ -212,7 +212,6 @@ HTTP endpointy:
 ### Prikazy klient -> server
 
 - `{"joint":1,"angle":90}`
-- `{"servo":3,"angle":90}` (kompatibilni alias)
 - `{"cmd":"sensors"}`
 - `{"cmd":"move_xyz","x":10,"y":20,"z":30,"pitch":0}`
 - `{"cmd":"home"}`

@@ -127,6 +127,7 @@ typedef enum {
     ROBOT_STATE_RUNNING = 3,       ///< Executing motion or program.
     ROBOT_STATE_READY_FOR_SYNC = 4, ///< Prepared for synchronized start.
     ROBOT_STATE_ERROR = 5,         ///< Error latched.
+    ROBOT_STATE_STOPPING = 6,      ///< Stop requested; decelerating/flushing queued program.
 } robot_system_state_t;
 
 /** @brief Last latched high-level error source. */
@@ -265,6 +266,10 @@ bool robot_is_armed(void);
 bool robot_is_operating(void);
 /** @brief Return `true` while a G-code program is running. */
 bool robot_is_program_running(void);
+/** @brief Return `true` if a stop was requested for current program execution. */
+bool robot_is_program_stop_requested(void);
+/** @brief Internal helper used by G-code module to mark stop requested. */
+void robot_set_program_stop_requested(bool requested);
 /** @brief Set synchronized-start readiness flag. */
 void robot_set_sync_ready(bool ready);
 /** @brief Return synchronized-start readiness flag. */

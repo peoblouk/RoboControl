@@ -209,22 +209,6 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             }
         }
 
-        cJSON *servo = cJSON_GetObjectItem(json, "servo");
-        if (cJSON_IsNumber(servo) && cJSON_IsNumber(angle)) {
-            int id = servo->valueint;
-            float a = (float)angle->valuedouble;
-            static const int servo_to_joint[7] = {0, 1, 1, 2, 3, 4, 5};
-
-            if (!robot_is_armed()) {
-                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"disarmed\"}");
-            } else if (id >= 0 && id < 7) {
-                joint_set_angle(servo_to_joint[id], a);
-                ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"joint\"}");
-            } else {
-                ws_send_to(fd, "{\"status\":\"error\",\"cmd\":\"joint\",\"reason\":\"bad_id\"}");
-            }
-        }
-
         cJSON *cmd = cJSON_GetObjectItem(json, "cmd");
 
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "sensors") == 0) {
@@ -312,7 +296,11 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 
         if (cJSON_IsString(cmd) && strcmp(cmd->valuestring, "gcode_stop") == 0) {
             gcode_stop();
-            ws_send_to(fd, "{\"status\":\"ok\",\"cmd\":\"gcode_stop\"}");
+            char resp[128];
+            snprintf(resp, sizeof(resp),
+                     "{\"status\":\"ok\",\"cmd\":\"gcode_stop\",\"state\":\"%s\"}",
+                     robot_state_str_());
+            ws_send_to(fd, resp);
         }
 
         cJSON_Delete(json);

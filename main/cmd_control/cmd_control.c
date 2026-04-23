@@ -18,10 +18,11 @@ static void print_robot_state(void)
     printf("state=%s last_error=%u\n",
            robot_get_system_state_name(),
            (unsigned)robot_get_last_error());
-    printf("armed=%s operating=%s program=%s referenced=%s tcp_est=%s sync_ready=%s\n",
+    printf("armed=%s operating=%s program=%s stop_req=%s referenced=%s tcp_est=%s sync_ready=%s\n",
            robot_is_armed() ? "yes" : "no",
            robot_is_operating() ? "yes" : "no",
            robot_is_program_running() ? "yes" : "no",
+           robot_is_program_stop_requested() ? "yes" : "no",
            robot_is_referenced() ? "yes" : "no",
            robot_has_tcp_estimate() ? "yes" : "no",
            robot_is_sync_ready() ? "yes" : "no");

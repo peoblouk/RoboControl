@@ -58,6 +58,9 @@ void gcode_reset(void)
 void gcode_stop(void)
 {
     s_stop = true;
+    if (robot_is_program_running()) {
+        robot_set_program_stop_requested(true);
+    }
     robot_cmd_queue_flush();
 }
 
@@ -193,17 +196,34 @@ static bool send_gripper_blocking(float gripper_deg, TickType_t timeout)
     return false;
 }
 
+static bool gcode_reject(const char *msg)
+{
+    if (msg && msg[0] != '\0') {
+        ESP_LOGE(TAG, "%s", msg);
+    }
+    return false;
+}
+
 static bool gcode_abort(const char *msg)
 {
-    ESP_LOGE(TAG, "%s", msg);
+    if (msg && msg[0] != '\0') {
+        ESP_LOGE(TAG, "%s", msg);
+    }
     s_error = true;
     s_stop = true;
     robot_cmd_queue_flush();
     return false;
 }
 
-bool gcode_push_line(const char *line_in)
+bool gcode_parse_line(const char *line_in, gcode_cmd_t *cmd)
 {
+    if (!line_in || !cmd) {
+        return gcode_reject("gcode_parse_line received null input.");
+    }
+
+    *cmd = (gcode_cmd_t){0};
+    cmd->type = GCMD_NONE;
+
     char line[200];
     strncpy(line, line_in, sizeof(line) - 1);
     line[sizeof(line) - 1] = '\0';
@@ -227,7 +247,7 @@ bool gcode_push_line(const char *line_in)
     bool hasS = parse_word(line, 'S', &s);
 
     if (hasG && hasM) {
-        return gcode_abort("Use one command per line (either G or M).");
+        return gcode_reject("Use one command per line (either G or M).");
     }
 
     if (hasF && !hasG && !hasM) {
@@ -239,79 +259,70 @@ bool gcode_push_line(const char *line_in)
         const int mi = (int)lroundf(m);
 
         if (mi == 2 || mi == 30) {
-            s_stop = true;
+            cmd->type = GCMD_STOP;
             return true;
         }
 
         if (mi == 10) {
-            if (!send_gripper_blocking(GRIPPER_OPEN_DEG, pdMS_TO_TICKS(5000))) {
-                if (s_error || s_stop) return false;
-                return gcode_abort("Queue timeout sending GRIPPER OPEN");
-            }
+            cmd->type = GCMD_GRIPPER;
+            cmd->gripper_deg = GRIPPER_OPEN_DEG;
             return true;
         }
 
         if (mi == 11) {
-            if (!send_gripper_blocking(GRIPPER_CLOSE_DEG, pdMS_TO_TICKS(5000))) {
-                if (s_error || s_stop) return false;
-                return gcode_abort("Queue timeout sending GRIPPER CLOSE");
-            }
+            cmd->type = GCMD_GRIPPER;
+            cmd->gripper_deg = GRIPPER_CLOSE_DEG;
             return true;
         }
 
         if (mi == 280) {
             if (!hasS) {
-                return gcode_abort("M280 requires S (gripper angle in degrees).");
+                return gcode_reject("M280 requires S (gripper angle in degrees).");
             }
-            if (!send_gripper_blocking(s, pdMS_TO_TICKS(5000))) {
-                if (s_error || s_stop) return false;
-                return gcode_abort("Queue timeout sending GRIPPER S-angle");
-            }
+            cmd->type = GCMD_GRIPPER;
+            cmd->gripper_deg = s;
             return true;
         }
 
         char msg[64];
         snprintf(msg, sizeof(msg), "Unsupported M-code M%d", mi);
-        return gcode_abort(msg);
+        return gcode_reject(msg);
     }
 
     if (!hasG) return true;
 
     int gi = (int)lroundf(g);
-    if (gi == 90) { st.absolute = true; return true; }
-    if (gi == 91) { st.absolute = false; return true; }
-    if (gi == 20) { st.units_mm = false; return true; }
-    if (gi == 21) { st.units_mm = true; return true; }
+    if (gi == 90) { st.absolute = true; cmd->type = GCMD_STATE; return true; }
+    if (gi == 91) { st.absolute = false; cmd->type = GCMD_STATE; return true; }
+    if (gi == 20) { st.units_mm = false; cmd->type = GCMD_STATE; return true; }
+    if (gi == 21) { st.units_mm = true; cmd->type = GCMD_STATE; return true; }
     if (gi == 4) {
         float dwell_ms = 0.0f;
         if (hasP) dwell_ms = p;
         else if (hasS) dwell_ms = s * 1000.0f;
-        else return gcode_abort("G4 requires P (ms) or S (s).");
+        else return gcode_reject("G4 requires P (ms) or S (s).");
 
-        if (dwell_ms < 0.0f) return gcode_abort("G4 dwell must be non-negative.");
+        if (dwell_ms < 0.0f) return gcode_reject("G4 dwell must be non-negative.");
         if (dwell_ms < 0.5f) return true;
 
-        TickType_t dwell_timeout = timeout_from_duration_s(dwell_ms / 1000.0f, 8.0f, 2.0f);
-        if (!send_dwell_blocking((uint32_t)lroundf(dwell_ms), dwell_timeout)) {
-            if (s_error || s_stop) return false;
-            return gcode_abort("Queue timeout sending DWELL");
-        }
+        cmd->type = GCMD_DWELL;
+        cmd->dwell_ms = (uint32_t)lroundf(dwell_ms);
         return true;
     }
 
     if (gi == 0 || gi == 1) {
         if (!robot_is_referenced()) {
-            return gcode_abort("Robot is not referenced. Run HOME/reference first.");
+            return gcode_reject("Robot is not referenced. Run HOME/reference first.");
         }
         if (!st.pose_known) {
-            return gcode_abort("Robot TCP pose is unknown. Use HOME or gcode sync before motion.");
+            return gcode_reject("Robot TCP pose is unknown. Use HOME or gcode sync before motion.");
         }
 
         if (hasF) {
             gcode_set_feed_from_word(f);
         }
 
-        float pitch_deg = hasP ? p : st.pitch_deg;
+        const float pitch_deg = hasP ? p : st.pitch_deg;
         float tx = st.x, ty = st.y, tz = st.z;
         if (hasX) tx = st.absolute ? to_mm(x) : (st.x + to_mm(x));
         if (hasY) ty = st.absolute ? to_mm(y) : (st.y + to_mm(y));
@@ -321,28 +332,83 @@ bool gcode_push_line(const char *line_in)
             char msg[96];
             snprintf(msg, sizeof(msg), "Unreachable WORK XYZ: x=%.2f y=%.2f z=%.2f pitch=%.2f",
                      tx, ty, tz, pitch_deg);
-            return gcode_abort(msg);
+            return gcode_reject(msg);
         }
 
         const float v_mm_s = (gi == 0) ? RAPID_MM_S : st.feed_mm_s;
-        const float duration_s = compute_move_duration_s(st.x, st.y, st.z, tx, ty, tz, v_mm_s);
-
-        TickType_t move_timeout = timeout_from_duration_s(duration_s, 8.0f, 8.0f);
-        if (!send_xyz_blocking(tx, ty, tz, pitch_deg, duration_s, move_timeout)) {
-            if (s_error || s_stop) return false;
-            return gcode_abort("Queue timeout sending WORK XYZ");
-        }
-
-        st.x = tx;
-        st.y = ty;
-        st.z = tz;
-        st.pitch_deg = pitch_deg;
+        cmd->type = GCMD_MOVE;
+        cmd->x = tx;
+        cmd->y = ty;
+        cmd->z = tz;
+        cmd->pitch_deg = pitch_deg;
+        cmd->duration_s = compute_move_duration_s(st.x, st.y, st.z, tx, ty, tz, v_mm_s);
+        cmd->is_rapid = (gi == 0);
         return true;
     }
 
     char msg[64];
     snprintf(msg, sizeof(msg), "Unsupported G-code G%d", gi);
-    return gcode_abort(msg);
+    return gcode_reject(msg);
+}
+
+bool gcode_execute_cmd(const gcode_cmd_t *cmd)
+{
+    if (!cmd) {
+        return gcode_abort("gcode_execute_cmd received null command.");
+    }
+
+    switch (cmd->type) {
+        case GCMD_NONE:
+        case GCMD_STATE:
+            return true;
+
+        case GCMD_STOP:
+            s_stop = true;
+            return true;
+
+        case GCMD_DWELL: {
+            TickType_t dwell_timeout = timeout_from_duration_s(cmd->dwell_ms / 1000.0f, 8.0f, 2.0f);
+            if (!send_dwell_blocking(cmd->dwell_ms, dwell_timeout)) {
+                if (s_error || s_stop) return false;
+                return gcode_abort("Queue timeout sending DWELL");
+            }
+            return true;
+        }
+
+        case GCMD_GRIPPER:
+            if (!send_gripper_blocking(cmd->gripper_deg, pdMS_TO_TICKS(5000))) {
+                if (s_error || s_stop) return false;
+                return gcode_abort("Queue timeout sending GRIPPER");
+            }
+            return true;
+
+        case GCMD_MOVE: {
+            TickType_t move_timeout = timeout_from_duration_s(cmd->duration_s, 8.0f, 8.0f);
+            if (!send_xyz_blocking(cmd->x, cmd->y, cmd->z, cmd->pitch_deg, cmd->duration_s, move_timeout)) {
+                if (s_error || s_stop) return false;
+                return gcode_abort("Queue timeout sending WORK XYZ");
+            }
+
+            st.x = cmd->x;
+            st.y = cmd->y;
+            st.z = cmd->z;
+            st.pitch_deg = cmd->pitch_deg;
+            st.pose_known = true;
+            return true;
+        }
+    }
+
+    return gcode_abort("Unknown G-code command type.");
+}
+
+bool gcode_push_line(const char *line_in)
+{
+    gcode_cmd_t cmd;
+    if (!gcode_parse_line(line_in, &cmd)) {
+        return gcode_abort("Parse error - execution stopped.");
+    }
+
+    return gcode_execute_cmd(&cmd);
 }
 
 bool gcode_run_file(const char *filename)
@@ -394,9 +460,7 @@ bool gcode_run_file(const char *filename)
 
     char line[200];
     while (!s_stop && fgets(line, sizeof(line), fp)) {
-        if (!gcode_push_line(line)) {
-            vTaskDelay(pdMS_TO_TICKS(20));
-        }
+        gcode_push_line(line);
     }
 
     fclose(fp);
