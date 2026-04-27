@@ -6,7 +6,7 @@
 
 static const char *TAG = "cmd_control";
 static rt_stats_t g_sensors_cmd_stats;
-static rt_stats_t g_servo_cmd_stats;
+static rt_stats_t g_joint_cmd_stats;
 static rt_stats_t g_move_cmd_stats;
 static esp_console_repl_t *s_repl = NULL;
 
@@ -279,11 +279,11 @@ static int cmd_joint(int argc, char **argv)
     joint_set_angle(id, angle);
     int64_t t_end_us = esp_timer_get_time();
     int64_t dt_us = t_end_us - t_start_us;
-    rt_stats_add_sample(&g_servo_cmd_stats, dt_us);
+    rt_stats_add_sample(&g_joint_cmd_stats, dt_us);
 
 #ifdef STATS_PRINT
     printf("OK: Joint %d -> %.1f° (time: %lld us)\n", id, angle, (long long)dt_us);
-    if (g_servo_cmd_stats.count % 10 == 0) rt_stats_print("JOINT_CMD", &g_servo_cmd_stats);
+    if (g_joint_cmd_stats.count % 10 == 0) rt_stats_print("JOINT_CMD", &g_joint_cmd_stats);
 #endif
     return 0;
 }
@@ -495,10 +495,10 @@ static int cmd_stats(int argc, char **argv)
 {
     (void)argc; (void)argv;
     if (g_sensors_cmd_stats.count == 0) { printf("SENSORS_CMD: no samples yet. Run 'sensors' a few times.\n"); return 0; }
-    if (g_servo_cmd_stats.count == 0) { printf("SERVO_CMD: no samples yet. Run 'servo' a few times.\n"); return 0; }
+    if (g_joint_cmd_stats.count == 0) { printf("JOINT_CMD: no samples yet. Run 'joint' a few times.\n"); return 0; }
     if (g_move_cmd_stats.count == 0) { printf("MOVE_CMD: no samples yet. Run 'move' a few times.\n"); return 0; }
     rt_stats_print("SENSORS_CMD", &g_sensors_cmd_stats);
-    rt_stats_print("SERVO_CMD", &g_servo_cmd_stats);
+    rt_stats_print("JOINT_CMD", &g_joint_cmd_stats);
     rt_stats_print("MOVE_CMD", &g_move_cmd_stats);
     return 0;
 }

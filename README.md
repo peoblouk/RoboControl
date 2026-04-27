@@ -192,15 +192,13 @@ HTTP endpointy:
 
 - `GET /` -> `spage.html`
 - `GET /settings` -> `settings.html`
-- `GET /status` -> `{ "online": true/false }`
 - `GET /web/style.css`
 - `GET /web/app.js`
 - `GET /web/robocontrol.ico`
 - `GET /favicon.ico`
 - `POST /wifi_reset`
-- `GET|POST /wifi_config`
+- `POST /wifi_config`
 - `GET /api/limits`
-- `POST /upload`
 - `GET /files`
 - `GET|PUT|DELETE /file/<name>`
 - `WS /ws`
@@ -301,7 +299,6 @@ Dulezite:
 - `GET /file/<name>` vraci obsah
 - `PUT /file/<name>` ulozi soubor (`.txt` nebo `.gcode`)
 - `DELETE /file/<name>` smaze soubor
-- `POST /upload` je legacy endpoint, uklada obsah do `/spiffs/data/gcode_file.gcode`
 
 ---
 

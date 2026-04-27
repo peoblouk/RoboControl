@@ -4,7 +4,6 @@
 
 #include "file_manager.h"
 
-static const char *TAG = "wifi_server";
 static const char *FM_BASE = FILE_STORAGE_PATH;
 static const char *FILE_PREFIX = HTTP_FILE_PREFIX;
 
@@ -176,38 +175,12 @@ static esp_err_t file_any_handler(httpd_req_t *req) {
     return httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "method");
 }
 
-static esp_err_t upload_post_handler(httpd_req_t *req) {
-    char filepath[128];
-    snprintf(filepath, sizeof(filepath), "%s/%s", FM_BASE, "gcode_file.gcode");
-
-    FILE *fd = fopen(filepath, "wb");
-    if (!fd) {
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    char buf[256];
-    int received;
-    while ((received = httpd_req_recv(req, buf, sizeof(buf))) > 0) {
-        if (fwrite(buf, 1, received, fd) != (size_t)received) {
-            fclose(fd);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
-        }
-    }
-    fclose(fd);
-    ESP_LOGI(TAG, "G-code saved: %s", filepath);
-    httpd_resp_sendstr(req, "File uploaded successfully!");
-    return ESP_OK;
-}
-
 esp_err_t file_manager_register(httpd_handle_t server) {
     if (!server) {
         return ESP_ERR_INVALID_ARG;
     }
 
     httpd_uri_t uris[] = {
-        {"/upload", HTTP_POST, upload_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/files", HTTP_GET, files_list_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/file/*", HTTP_ANY, file_any_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
     };

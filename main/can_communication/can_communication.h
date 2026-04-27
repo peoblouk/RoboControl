@@ -40,8 +40,6 @@ typedef enum {
     CAN_CMD_PROGRAM_DELETE = 0x14, ///< Delete program slot.
     CAN_CMD_PREPARE        = 0x20, ///< Prepare slot/program for sync run.
     CAN_CMD_SYNC_START     = 0x21, ///< Start synchronized execution.
-    CAN_CMD_JOG_XY         = 0x22, ///< Manual jog in XY plane.
-    CAN_CMD_JOG_Z          = 0x23, ///< Manual jog in Z axis.
 } can_command_id_t;
 
 /** @brief Telemetry/info frame kinds sent on `CAN_INFO_ID_BASE + node_id`. */

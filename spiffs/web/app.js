@@ -16,8 +16,6 @@ const PITCH_MAX = 90;
 const PITCH_DEFAULT = -53;
 const XYZ_AXES = ["x", "y", "z"];
 const MEAS_X_FIXED_Z = 90;
-const MEAS_Y_FIXED_X = 100;
-const MEAS_Y_FIXED_Z = 50;
 
 let measurementSeries = [];
 let measurementIndex = -1;
@@ -601,74 +599,6 @@ function reverseMeasurementSeries() {
   updateMeasurementStatus("Series reversed");
 }
 
-function setMeasurementPresetValues(values = {}) {
-  const axisEl = document.getElementById("meas_axis");
-  const xEl = document.getElementById("meas_x");
-  const yEl = document.getElementById("meas_y");
-  const zEl = document.getElementById("meas_z");
-  const startEl = document.getElementById("meas_start");
-  const stopEl = document.getElementById("meas_stop");
-  const stepEl = document.getElementById("meas_step");
-
-  if (values.axis != null && axisEl) axisEl.value = values.axis;
-  if (values.x != null && xEl) xEl.value = values.x;
-  if (values.y != null && yEl) yEl.value = values.y;
-  if (values.z != null && zEl) zEl.value = values.z;
-  if (values.start != null && startEl) startEl.value = values.start;
-  if (values.stop != null && stopEl) stopEl.value = values.stop;
-  if (values.step != null && stepEl) stepEl.value = values.step;
-
-  if (values.refreshAxisUi) updateMeasurementAxisUI();
-  invalidateMeasurementSeries();
-}
-
-function applyPresetXY() {
-  const axis = getMeasurementAxis();
-  setMeasurementPresetValues({
-    x: 100,
-    y: 0,
-    z: axis === "x" ? MEAS_X_FIXED_Z : axis === "y" ? MEAS_Y_FIXED_Z : 100,
-  });
-}
-
-function applyPresetZSeries() {
-  setMeasurementPresetValues({
-    axis: "z",
-    start: 60,
-    stop: 110,
-    step: 10,
-    refreshAxisUi: true,
-  });
-}
-
-function applyPresetXSeries() {
-  setMeasurementPresetValues({
-    axis: "x",
-    z: MEAS_X_FIXED_Z,
-    start: 60,
-    stop: 140,
-    step: 10,
-    refreshAxisUi: true,
-  });
-}
-
-function applyPresetYSeries() {
-  setMeasurementPresetValues({
-    axis: "y",
-    x: MEAS_Y_FIXED_X,
-    z: MEAS_Y_FIXED_Z,
-    start: -20,
-    stop: 20,
-    step: 10,
-    refreshAxisUi: true,
-  });
-}
-
-function applyMeasurementPreset() {
-  applyPresetYSeries();
-  prepareMeasurementSeries();
-}
-
 function moveXYZ() {
   if (!ws || ws.readyState !== 1) {
     alert("WebSocket not connected.");
@@ -1049,7 +979,7 @@ function bootSettingsPage() {
 }
 
 function isControlPage() {
-  return !!document.getElementById("servo-controls");
+  return !!document.getElementById("joint-controls");
 }
 
 function isSettingsPage() {

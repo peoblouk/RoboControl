@@ -159,7 +159,7 @@
 #define SERVO3_OFF_DEG  149.0f
 #define SERVO4_OFF_DEG  70.0f
 #define SERVO5_OFF_DEG  77.0f
-#define SERVO6_OFF_DEG  0.0f
+#define SERVO6_OFF_DEG  90.0f
 
 #define SERVO0_DIR      +1.0f
 #define SERVO1_DIR      -1.0f
@@ -167,7 +167,7 @@
 #define SERVO3_DIR      +1.0f
 #define SERVO4_DIR      -1.0f
 #define SERVO5_DIR      +1.0f
-#define SERVO6_DIR      +1.0f
+#define SERVO6_DIR      -1.0f
 
 #define J1_B_TRIM_DEG   -0.5f
 
@@ -224,12 +224,6 @@
 // ===============================
 #define SEG_BUF_LEN          32
 #define ROBOT_CMD_QUEUE_LEN  32
-
-// ===============================
-// ROBOT: LEGACY INTERPOLATION
-// ===============================
-#define INTERP_STEPS     50
-#define INTERP_DELAY_MS  20
 
 // ===============================
 // ROBOT: ARM GEOMETRY (mm)

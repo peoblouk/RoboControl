@@ -79,19 +79,6 @@ static esp_err_t wifi_reset_post_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-static esp_err_t status_get_handler(httpd_req_t *req) {
-    wifi_sta_list_t sta_list;
-    bool online = false;
-    if (esp_wifi_ap_get_sta_list(&sta_list) == ESP_OK && sta_list.num > 0) {
-        online = true;
-    }
-
-    char resp[64];
-    snprintf(resp, sizeof(resp), "{\"online\":%s}", online ? "true" : "false");
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, resp, strlen(resp));
-}
-
 static esp_err_t icon_get_handler(httpd_req_t *req) {
     FILE *f = fopen(FS_WEB_BASE "/robocontrol.ico", "rb");
     if (!f) {
@@ -117,41 +104,37 @@ static esp_err_t icon_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t wifi_config_handler(httpd_req_t *req) {
-    if (req->method == HTTP_GET) {
-        httpd_resp_sendstr(req, "Use POST to configure WiFi.");
-        return ESP_OK;
-    } else if (req->method == HTTP_POST) {
-        char buf[128];
-        int remaining = req->content_len;
-        while (remaining > 0) {
-            int to_read = remaining > (int)(sizeof(buf) - 1) ? (int)(sizeof(buf) - 1) : remaining;
-            int received = httpd_req_recv(req, buf, to_read);
-            if (received <= 0) {
-                return ESP_FAIL;
-            }
-            remaining -= received;
-            buf[received] = '\0';
-        }
-        cJSON *json = cJSON_Parse(buf);
-        if (!json) {
-            httpd_resp_send_500(req);
+    char buf[128];
+    int remaining = req->content_len;
+    while (remaining > 0) {
+        int to_read = remaining > (int)(sizeof(buf) - 1) ? (int)(sizeof(buf) - 1) : remaining;
+        int received = httpd_req_recv(req, buf, to_read);
+        if (received <= 0) {
             return ESP_FAIL;
         }
-        cJSON *ssid_json = cJSON_GetObjectItemCaseSensitive(json, "ssid");
-        cJSON *pass_json = cJSON_GetObjectItemCaseSensitive(json, "password");
-        if (cJSON_IsString(ssid_json) && cJSON_IsString(pass_json)) {
-            save_wifi_config(ssid_json->valuestring, pass_json->valuestring);
-            ESP_ERROR_CHECK(esp_wifi_stop());
-            ESP_ERROR_CHECK(esp_wifi_deinit());
-            wifi_init_softap();
-            httpd_resp_sendstr(req, "WiFi config saved!");
-        } else {
-            httpd_resp_send_500(req);
-        }
-        cJSON_Delete(json);
-        return ESP_OK;
+        remaining -= received;
+        buf[received] = '\0';
     }
-    return ESP_FAIL;
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *ssid_json = cJSON_GetObjectItemCaseSensitive(json, "ssid");
+    cJSON *pass_json = cJSON_GetObjectItemCaseSensitive(json, "password");
+    if (cJSON_IsString(ssid_json) && cJSON_IsString(pass_json)) {
+        save_wifi_config(ssid_json->valuestring, pass_json->valuestring);
+        ESP_ERROR_CHECK(esp_wifi_stop());
+        ESP_ERROR_CHECK(esp_wifi_deinit());
+        wifi_init_softap();
+        httpd_resp_sendstr(req, "WiFi config saved!");
+    } else {
+        httpd_resp_send_500(req);
+    }
+    cJSON_Delete(json);
+    return ESP_OK;
 }
 
 static esp_err_t limits_get_handler(httpd_req_t *req) {
@@ -189,14 +172,13 @@ esp_err_t http_handlers_register(httpd_handle_t server) {
 
     httpd_uri_t uris[] = {
         {"/", HTTP_GET, root_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
-        {"/status", HTTP_GET, status_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/settings", HTTP_GET, settings_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/web/style.css", HTTP_GET, style_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/web/app.js", HTTP_GET, app_js_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/web/robocontrol.ico", HTTP_GET, icon_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/favicon.ico", HTTP_GET, icon_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/wifi_reset", HTTP_POST, wifi_reset_post_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
-        {"/wifi_config", HTTP_ANY, wifi_config_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
+        {"/wifi_config", HTTP_POST, wifi_config_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
         {"/api/limits", HTTP_GET, limits_get_handler, NULL, .is_websocket = false, .handle_ws_control_frames = false},
     };
 

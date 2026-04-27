@@ -54,13 +54,6 @@ static uint8_t can_slot_to_wire(int slot)
 {
     return (slot >= 0 && slot < CAN_PROGRAM_SLOT_COUNT) ? (uint8_t)slot : 0xFFU;
 }
-static int16_t can_decode_i16_le(const uint8_t *data)
-{
-    if (data == NULL) return 0;
-    uint16_t raw = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
-    return (int16_t)raw;
-}
-
 static void can_encode_i16_le(uint8_t *dst, int16_t value)
 {
     if (dst == NULL) return;
@@ -137,8 +130,6 @@ static const char *can_cmd_str(uint8_t cmd)
         case CAN_CMD_PROGRAM_DELETE: return "PROGRAM_DELETE";
         case CAN_CMD_PREPARE: return "PREPARE";
         case CAN_CMD_SYNC_START: return "SYNC_START";
-        case CAN_CMD_JOG_XY: return "JOG_XY";
-        case CAN_CMD_JOG_Z: return "JOG_Z";
         default: return "UNKNOWN";
     }
 }
@@ -791,44 +782,6 @@ static void can_process_command_frame(const twai_message_t *msg)
 
             (void)can_send_response(cmd, CAN_PROTO_OK, (uint8_t)prepared_slot, 0, 0, 0);
             (void)can_send_status_frame_internal();
-            return;
-        }
-
-        case CAN_CMD_JOG_XY: {
-            if (msg->data_length_code < 7) {
-                can_reply_protocol_error(cmd, CAN_PROTO_ERR_INVALID_LENGTH, msg->data_length_code, 0);
-                return;
-            }
-
-            const uint8_t seq = msg->data[1];
-            const int16_t vx = can_decode_i16_le(&msg->data[2]);
-            const int16_t vy = can_decode_i16_le(&msg->data[4]);
-            const uint8_t flags = msg->data[6];
-            (void)vx;
-            (void)vy;
-
-            can_set_last_protocol_error(CAN_PROTO_OK);
-            if (!broadcast) {
-                (void)can_send_response(cmd, CAN_PROTO_OK, seq, flags, 0, 0);
-            }
-            return;
-        }
-
-        case CAN_CMD_JOG_Z: {
-            if (msg->data_length_code < 5) {
-                can_reply_protocol_error(cmd, CAN_PROTO_ERR_INVALID_LENGTH, msg->data_length_code, 0);
-                return;
-            }
-
-            const uint8_t seq = msg->data[1];
-            const int16_t vz = can_decode_i16_le(&msg->data[2]);
-            const uint8_t flags = msg->data[4];
-            (void)vz;
-
-            can_set_last_protocol_error(CAN_PROTO_OK);
-            if (!broadcast) {
-                (void)can_send_response(cmd, CAN_PROTO_OK, seq, flags, 0, 0);
-            }
             return;
         }
 

@@ -24,7 +24,7 @@
 // Public API
 // ===============================
 
-/** @brief Register file-management HTTP routes (`/upload`, `/files`, `/file/<name>`). */
+/** @brief Register file-management HTTP routes (`/files`, `/file/<name>`). */
 esp_err_t file_manager_register(httpd_handle_t server);
 
 #endif // FILE_MANAGER_H

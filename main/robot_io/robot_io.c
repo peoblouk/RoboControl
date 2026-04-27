@@ -472,7 +472,8 @@ void servos_init(void)
 // Low-level servo write
 static void servo_write_angle_hw(int master, float angle, int other, float other_angle)
 {
-    uint32_t duty = angle_to_duty(master, angle);
+    float hw_angle = (master == SERVO_J5) ? map_servo(master, angle) : angle;
+    uint32_t duty = angle_to_duty(master, hw_angle);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, servos[master].channel, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, servos[master].channel);
 
