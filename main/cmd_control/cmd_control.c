@@ -5,9 +5,6 @@
 #include "cmd_control.h"
 
 static const char *TAG = "cmd_control";
-static rt_stats_t g_sensors_cmd_stats;
-static rt_stats_t g_joint_cmd_stats;
-static rt_stats_t g_move_cmd_stats;
 static esp_console_repl_t *s_repl = NULL;
 
 static void print_robot_state(void)
@@ -275,16 +272,9 @@ static int cmd_joint(int argc, char **argv)
         return 0;
     }
 
-    int64_t t_start_us = esp_timer_get_time();
     joint_set_angle(id, angle);
-    int64_t t_end_us = esp_timer_get_time();
-    int64_t dt_us = t_end_us - t_start_us;
-    rt_stats_add_sample(&g_joint_cmd_stats, dt_us);
 
-#ifdef STATS_PRINT
-    printf("OK: Joint %d -> %.1f° (time: %lld us)\n", id, angle, (long long)dt_us);
-    if (g_joint_cmd_stats.count % 10 == 0) rt_stats_print("JOINT_CMD", &g_joint_cmd_stats);
-#endif
+    printf("OK: Joint %d -> %.1f deg\n", id, angle);
     return 0;
 }
 
@@ -347,20 +337,12 @@ static int cmd_move(int argc, char **argv)
         return 0;
     }
 
-    int64_t t_start_us = esp_timer_get_time();
     bool res = robot_cmd_move_xyz_work(x, y, z, pitch);
-    int64_t t_end_us = esp_timer_get_time();
-    int64_t dt_us = t_end_us - t_start_us;
-    rt_stats_add_sample(&g_move_cmd_stats, dt_us);
-
-#ifdef STATS_PRINT
     if (res) {
-        printf("OK: Move(work) to X=%.1f Y=%.1f Z=%.1f queued (pitch %.1f) (time: %lld us)\n", x, y, z, pitch, (long long)dt_us);
+        printf("OK: Move(work) to X=%.1f Y=%.1f Z=%.1f queued (pitch %.1f)\n", x, y, z, pitch);
     } else {
-        printf("ERR: move rejected (not referenced / queue full / not started) (time: %lld us)\n", (long long)dt_us);
+        printf("ERR: move rejected (not referenced / queue full / not started)\n");
     }
-    if (g_move_cmd_stats.count % 10 == 0) rt_stats_print("MOVE_CMD", &g_move_cmd_stats);
-#endif
     return 0;
 }
 
@@ -401,7 +383,6 @@ static int cmd_gcode(int argc, char **argv)
 static int cmd_sensors(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    int64_t t_start_us = esp_timer_get_time();
 
     const int joint_to_servo[JOINT_COUNT] = {
         JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
@@ -420,13 +401,6 @@ static int cmd_sensors(int argc, char **argv)
         }
     }
 
-    int64_t t_end_us = esp_timer_get_time();
-    int64_t dt_us = t_end_us - t_start_us;
-    rt_stats_add_sample(&g_sensors_cmd_stats, dt_us);
-#ifdef STATS_PRINT
-    printf("SENSORS time: %lld us (%.3f ms)\n", (long long)dt_us, dt_us / 1000.0f);
-    if (g_sensors_cmd_stats.count % 20 == 0) rt_stats_print("SENSORS_CMD", &g_sensors_cmd_stats);
-#endif
     return 0;
 }
 
@@ -488,18 +462,6 @@ static int cmd_ls(int argc, char **argv)
     }
     closedir(dir);
     printf("----------------------------------------\nTotal files: %d\n\n", count);
-    return 0;
-}
-
-static int cmd_stats(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    if (g_sensors_cmd_stats.count == 0) { printf("SENSORS_CMD: no samples yet. Run 'sensors' a few times.\n"); return 0; }
-    if (g_joint_cmd_stats.count == 0) { printf("JOINT_CMD: no samples yet. Run 'joint' a few times.\n"); return 0; }
-    if (g_move_cmd_stats.count == 0) { printf("MOVE_CMD: no samples yet. Run 'move' a few times.\n"); return 0; }
-    rt_stats_print("SENSORS_CMD", &g_sensors_cmd_stats);
-    rt_stats_print("JOINT_CMD", &g_joint_cmd_stats);
-    rt_stats_print("MOVE_CMD", &g_move_cmd_stats);
     return 0;
 }
 
@@ -630,7 +592,6 @@ static void register_commands(void)
         { .command = "test",   .help = "Run simple XYZ test motion sequence in WORK frame", .func = &cmd_test },
         { .command = "print",  .help = "Print file content: print <path>", .func = &cmd_print_file },
         { .command = "ls",     .help = "List files in storage", .func = &cmd_ls },
-        { .command = "stats",  .help = "Print timing stats for control commands", .func = &cmd_stats },
         { .command = "tasks",  .help = "Print FreeRTOS task list", .func = &cmd_tasks },
         { .command = "gcode",  .help = "G-code: gcode run <file>, gcode line <...>, gcode stop, gcode reset, gcode sync", .func = &cmd_gcode },
         { .command = "can",    .help = "CAN/TWAI: can up | can status | can probe [count] [gap_ms] | can hb | can tx <id> [b0..b7] | can recover", .func = &cmd_can },
@@ -678,5 +639,4 @@ void cmd_control_start(void)
     }
 
     ESP_LOGI(TAG, "console REPL started on core %d", CORE_COMM);
-    rt_stats_reset(&g_sensors_cmd_stats);
 }

@@ -4,6 +4,7 @@
 
 #include "robot_io.h"
 #include "gcode.h"
+#include "rt_stats.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -15,7 +16,8 @@ static adc_oneshot_unit_handle_t s_adc1 = NULL;
 static adc_oneshot_unit_handle_t s_adc2 = NULL;
 #endif
 
-#define SERVO_DUTY_MAX ((1U << 14) - 1)   // timer is LEDC_TIMER_14_BIT
+#define SERVO_DUTY_RES LEDC_TIMER_14_BIT
+#define SERVO_DUTY_MAX ((1U << SERVO_DUTY_RES) - 1U)
 
 typedef struct {
     char filename[64];
@@ -447,7 +449,7 @@ void servos_init(void)
     ledc_timer_config_t timer = {
         .speed_mode       = LEDC_LOW_SPEED_MODE,
         .timer_num        = LEDC_TIMER_0,
-        .duty_resolution  = LEDC_TIMER_14_BIT,
+        .duty_resolution  = SERVO_DUTY_RES,
         .freq_hz          = SERVO_PWM_FREQ,
         .clk_cfg          = LEDC_AUTO_CLK
     };
@@ -916,6 +918,11 @@ static void apply_joints(const float q[SERVO_COUNT])
     }
 }
 
+static inline void robot_stats_record_loop_work(int64_t start_us)
+{
+    rt_monitor_add_sample(RT_MON_CONTROL_LOOP_WORK_US, rt_now_us() - start_us);
+}
+
 static void robot_control_task(void *arg)
 {
     (void)arg;
@@ -928,39 +935,56 @@ static void robot_control_task(void *arg)
 
     robot_cmd_t cmd;
     static bool disarmed_latched = false;
+    int64_t last_loop_start_us = 0;
 
     for (;;) {
+        const int64_t loop_start_us = rt_now_us();
+        if (last_loop_start_us != 0) {
+            rt_monitor_add_sample(RT_MON_CONTROL_LOOP_PERIOD_US, loop_start_us - last_loop_start_us);
+        }
+        last_loop_start_us = loop_start_us;
+        int64_t loop_work_start_us = loop_start_us;
 
-            if (!s_armed) {
-                if (!disarmed_latched) {
-                    seg_flush();
-                    for (int i = 0; i < SERVO_COUNT; i++) {
-                        ledc_stop(LEDC_LOW_SPEED_MODE, servos[i].channel, 0);
-                    }
-                    disarmed_latched = true;
+        if (!s_armed) {
+            if (!disarmed_latched) {
+                seg_flush();
+                for (int i = 0; i < SERVO_COUNT; i++) {
+                    ledc_stop(LEDC_LOW_SPEED_MODE, servos[i].channel, 0);
                 }
-
-                while (xQueueReceive(s_robot_queue, &cmd, 0) == pdTRUE) {
-                }
-
-                s_operating = false;
-                vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
-                continue;
+                disarmed_latched = true;
             }
+
+            while (xQueueReceive(s_robot_queue, &cmd, 0) == pdTRUE) {
+            }
+
+            s_operating = false;
+            robot_stats_record_loop_work(loop_work_start_us);
+            vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
+            continue;
+        }
 
         disarmed_latched = false;
 
-        if (xQueueReceive(s_robot_queue, &cmd, pdMS_TO_TICKS(EXEC_DT_MS)) == pdTRUE) {
+        BaseType_t cmd_received = xQueueReceive(s_robot_queue, &cmd, pdMS_TO_TICKS(EXEC_DT_MS));
+        loop_work_start_us = rt_now_us();
+
+        if (cmd_received == pdTRUE) {
+            if (cmd.enqueue_time_us > 0) {
+                rt_monitor_add_sample(RT_MON_QUEUE_LATENCY_US, loop_work_start_us - cmd.enqueue_time_us);
+            }
 
             if (cmd.type == ROBOT_CMD_QUEUE_FLUSH) {
                 seg_flush();
                 s_operating = false;
+                robot_stats_record_loop_work(loop_work_start_us);
                 continue;
             }
 
             if (seg_full()) {
                 ESP_LOGW(TAG, "Planner full, dropping command");
+                rt_monitor_count_event(RT_MON_EVENT_PLANNER_SEG_FULL);
                 s_operating = s_current_segment.active || !seg_empty();
+                robot_stats_record_loop_work(loop_work_start_us);
                 continue;
             }
 
@@ -991,10 +1015,13 @@ static void robot_control_task(void *arg)
                 ESP_LOGD(TAG, "IK TCP(base): x=%.1f y=%.1f z=%.1f pitch=%.1f",
                          cmd.x, cmd.y, cmd.z, pitch);
 
+                int64_t ik_start_us = rt_now_us();
                 bool ok = inverse_kinematics(cmd.x, cmd.y, cmd.z, pitch, seg.q1);
+                rt_monitor_add_sample(RT_MON_PLANNER_IK_US, rt_now_us() - ik_start_us);
                 if (!ok) {
                     ESP_LOGE(TAG, "IK TCP failed for BASE x=%.1f y=%.1f z=%.1f pitch=%.1f",
                              cmd.x, cmd.y, cmd.z, pitch);
+                    rt_monitor_count_event(RT_MON_EVENT_PLANNER_IK_FAIL);
 
                     if (robot_is_program_running()) {
                         robot_set_error_internal(ROBOT_ERROR_GCODE);
@@ -1007,6 +1034,7 @@ static void robot_control_task(void *arg)
                     } else {
                         s_operating = s_current_segment.active || !seg_empty();
                     }
+                    robot_stats_record_loop_work(loop_work_start_us);
                     continue;
                 }
 
@@ -1054,6 +1082,7 @@ static void robot_control_task(void *arg)
             default:
                 ESP_LOGW(TAG, "Unknown robot command: %d", cmd.type);
                 s_operating = s_current_segment.active || !seg_empty();
+                robot_stats_record_loop_work(loop_work_start_us);
                 continue;
             }
 
@@ -1070,6 +1099,7 @@ static void robot_control_task(void *arg)
         if (!s_current_segment.active) {
             if (!seg_pop(&s_current_segment)) {
                 s_operating = false;
+                robot_stats_record_loop_work(loop_work_start_us);
                 continue;
             }
             s_current_segment.t = 0;
@@ -1096,7 +1126,9 @@ static void robot_control_task(void *arg)
         }
 
         robot_validate_and_prepare_q(q, true);
+        int64_t apply_start_us = rt_now_us();
         apply_joints(q);
+        rt_monitor_add_sample(RT_MON_APPLY_JOINTS_US, rt_now_us() - apply_start_us);
 
         if (s >= 1.0f) {
             portENTER_CRITICAL(&s_state_mux);
@@ -1134,6 +1166,7 @@ static void robot_control_task(void *arg)
         }
 
         s_operating = s_current_segment.active || !seg_empty();
+        robot_stats_record_loop_work(loop_work_start_us);
     }
 }
 
@@ -1200,6 +1233,23 @@ void robot_arm(void)
     s_armed = true;
 }
 
+static bool robot_queue_send(robot_cmd_t *cmd, TickType_t timeout)
+{
+    if (!cmd || s_robot_queue == NULL) {
+        rt_monitor_count_event(RT_MON_EVENT_QUEUE_SEND_FAIL);
+        return false;
+    }
+
+    cmd->enqueue_time_us = rt_now_us();
+
+    bool queued = (xQueueSend(s_robot_queue, cmd, timeout) == pdTRUE);
+    rt_monitor_count_event(queued ? RT_MON_EVENT_QUEUE_SEND_OK : RT_MON_EVENT_QUEUE_SEND_FAIL);
+    if (queued) {
+        robot_set_sync_ready(false);
+    }
+    return queued;
+}
+
 // ===============================
 // CONTROL API
 // ===============================
@@ -1224,9 +1274,7 @@ bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
     cmd.type = ROBOT_CMD_MOVE_JOINTS;
     for (int i = 0; i < SERVO_COUNT; i++) cmd.q_target[i] = q_target[i];
 
-    bool queued = (xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE);
-    if (queued) robot_set_sync_ready(false);
-    return queued;
+    return robot_queue_send(&cmd, 0);
 }
 
 bool robot_cmd_move_joints_home(const float q_target[SERVO_COUNT],
@@ -1248,9 +1296,7 @@ bool robot_cmd_move_joints_home(const float q_target[SERVO_COUNT],
     cmd.z = home_z_base;
     cmd.pitch_deg = home_pitch_deg;
 
-    bool queued = (xQueueSend(s_robot_queue, &cmd, 0) == pdTRUE);
-    if (queued) robot_set_sync_ready(false);
-    return queued;
+    return robot_queue_send(&cmd, 0);
 }
 
 bool robot_cmd_move_xyz(float x, float y, float z, float pitch_deg)
@@ -1269,9 +1315,7 @@ bool robot_cmd_move_xyz_t(float x, float y, float z, float pitch_deg, float dura
     cmd.pitch_deg = pitch_deg;
     cmd.duration_s = duration_s;
 
-    bool queued = (xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE);
-    if (queued) robot_set_sync_ready(false);
-    return queued;
+    return robot_queue_send(&cmd, timeout);
 }
 
 bool robot_cmd_move_xyz_work(float x, float y, float z, float pitch_deg)
@@ -1301,9 +1345,7 @@ bool robot_cmd_move_joints_t(const float q_target[SERVO_COUNT], float duration_s
     for (int i = 0; i < SERVO_COUNT; i++) cmd.q_target[i] = q_target[i];
     cmd.duration_s = duration_s;
 
-    bool queued = (xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE);
-    if (queued) robot_set_sync_ready(false);
-    return queued;
+    return robot_queue_send(&cmd, timeout);
 }
 
 bool robot_cmd_dwell_ms(uint32_t dwell_ms, TickType_t timeout)
@@ -1315,9 +1357,7 @@ bool robot_cmd_dwell_ms(uint32_t dwell_ms, TickType_t timeout)
     cmd.type = ROBOT_CMD_DWELL;
     cmd.dwell_ms = dwell_ms;
 
-    bool queued = (xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE);
-    if (queued) robot_set_sync_ready(false);
-    return queued;
+    return robot_queue_send(&cmd, timeout);
 }
 
 bool robot_cmd_gripper_set(float gripper_deg, TickType_t timeout)
@@ -1330,9 +1370,7 @@ bool robot_cmd_gripper_set(float gripper_deg, TickType_t timeout)
     cmd.gripper_deg = gripper_deg;
     cmd.duration_s = GRIPPER_MOVE_T_S;
 
-    bool queued = (xQueueSend(s_robot_queue, &cmd, timeout) == pdTRUE);
-    if (queued) robot_set_sync_ready(false);
-    return queued;
+    return robot_queue_send(&cmd, timeout);
 }
 
 void robot_cmd_queue_flush(void)
@@ -1341,8 +1379,7 @@ void robot_cmd_queue_flush(void)
 
     robot_cmd_t cmd = {0};
     cmd.type = ROBOT_CMD_QUEUE_FLUSH;
-    (void)xQueueSend(s_robot_queue, &cmd, 0);
-    robot_set_sync_ready(false);
+    (void)robot_queue_send(&cmd, 0);
 }
 
 // ===============================

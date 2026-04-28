@@ -26,6 +26,8 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    rt_monitor_start_file_task(); // Periodically write runtime stats to SPIFFS
+
     servos_init();             // Initialize servos
     #if SENSOR_COUNT > 0
         sensors_init();            // Initialize sensors

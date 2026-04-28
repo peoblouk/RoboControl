@@ -157,6 +157,7 @@ typedef enum {
 /** @brief One robot command queue item. */
 typedef struct {
     robot_cmd_type_t type;       ///< Command discriminator.
+    int64_t enqueue_time_us;     ///< Time when command was queued.
     float q_target[SERVO_COUNT]; ///< Joint-space target [deg].
     float x, y, z;               ///< Cartesian target XYZ.
     float pitch_deg;             ///< Cartesian target pitch [deg].

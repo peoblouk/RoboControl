@@ -27,6 +27,7 @@ Aktualni verze kombinuje:
 - SPIFFS file manager (`/spiffs/data`) pro `.txt` a `.gcode`
 - CAN upload/spousteni programu po slotech (`can_slot_0..3.gcode`)
 - Stavova RGB LED na ESP32-S3-DevKitC-1
+- Runtime statistiky rizeni zapisovane do SPIFFS (`rt_stats.txt`)
 
 ---
 
@@ -171,11 +172,16 @@ Konzole bezi pres `esp_console`:
 - `ls`
 - `print <path>`
 - `tasks`
-- `stats`
 - `test`
 - `sensors`
 
 Poznamka k `move`: kdyz nezadas `pitch`, CLI zkusi automaticky najit nejblizsi validni pitch pro IK.
+
+Runtime statistiky si vytisknes pres:
+
+```text
+print rt_stats.txt
+```
 
 ---
 
@@ -299,6 +305,26 @@ Dulezite:
 - `GET /file/<name>` vraci obsah
 - `PUT /file/<name>` ulozi soubor (`.txt` nebo `.gcode`)
 - `DELETE /file/<name>` smaze soubor
+
+---
+
+## Runtime statistiky
+
+Firmware prubezne sbira zakladni casove statistiky primo z robot control vrstvy. Nejde uz o cas obsluhy konzolovych prikazu, ale o realnejsi mista v rizeni:
+
+- `control_loop_period` - perioda hlavni control smycky
+- `control_loop_work` - aktivni prace jedne iterace bez cekani na frontu
+- `apply_joints` - prepocteni a zapis interpolovanych kloubu/PWM
+- `planner_ik` - cas IK vypoctu v planneru
+- `queue_latency` - cas od vlozeni prikazu do fronty po prevzeti control taskem
+
+Soubor se pravidelne prepisuje jako aktualni snapshot:
+
+- cesta: `/spiffs/data/rt_stats.txt`
+- perioda zapisu: `RT_STATS_WRITE_PERIOD_MS` (default `1000 ms`)
+- CLI cteni: `print rt_stats.txt`
+
+Snapshot obsahuje `n`, `min`, `max`, `mean`, `stddev` v mikrosekundach a jednoduche event countery jako `queue_send_fail`, `planner_seg_full` nebo `planner_ik_fail`.
 
 ---
 

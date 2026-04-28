@@ -14,7 +14,7 @@
 // ===============================
 // NODE PROFILE
 // ===============================
-#define ROBOT_NODE_ID 2 // Unique ID
+#define ROBOT_NODE_ID 1 // Unique ID
 
 #if (ROBOT_NODE_ID < 1) || (ROBOT_NODE_ID > 127)
 #error "ROBOT_NODE_ID must be in range 1..127"
@@ -150,8 +150,8 @@
 #define SERVO5_MIN_US  1000
 #define SERVO5_MAX_US  2300
 
-#define SERVO6_MIN_US  720
-#define SERVO6_MAX_US  2000
+#define SERVO6_MIN_US  500
+#define SERVO6_MAX_US  2100
 
 #define SERVO0_OFF_DEG  90.0f
 #define SERVO1_OFF_DEG  175.0f
@@ -159,7 +159,7 @@
 #define SERVO3_OFF_DEG  149.0f
 #define SERVO4_OFF_DEG  70.0f
 #define SERVO5_OFF_DEG  77.0f
-#define SERVO6_OFF_DEG  90.0f
+#define SERVO6_OFF_DEG  100.0f
 
 #define SERVO0_DIR      +1.0f
 #define SERVO1_DIR      -1.0f
@@ -315,7 +315,13 @@
 // CMD CONTROL CONFIGURATION
 // ===============================
 #define CMD_BUF_SIZE 128
-#define STATS_PRINT
+
+// ===============================
+// REAL-TIME STATS LOGGING
+// ===============================
+#define RT_STATS_FILE_NAME        "rt_stats.txt"
+#define RT_STATS_FILE_PATH        FILE_STORAGE_PATH "/" RT_STATS_FILE_NAME
+#define RT_STATS_WRITE_PERIOD_MS  1000
 
 // ===============================
 // GCODE CONFIGURATION
