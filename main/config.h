@@ -65,7 +65,6 @@
 #define SERVO_J5      6   // gripper
 
 // TCP pitch convention: negative = tool points downward in the X-Z plane.
-#define ROBOT_DEFAULT_PITCH_DEG -53.0f
 
 // Joint -> master servo mapping
 #define JOINT0_SERVO  SERVO_J0
@@ -130,6 +129,16 @@
 #define NODE_HOME_J5 96
 #define NODE_HOME_J6 90
 
+// #define ROBOT_HOME_X_BASE_DEFAULT     104.89f //stare
+// #define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
+// #define ROBOT_HOME_Z_BASE_DEFAULT     119.00f
+// #define ROBOT_HOME_PITCH_DEG_DEFAULT   -65.0f
+
+#define ROBOT_HOME_X_BASE_DEFAULT     115.0f
+#define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
+#define ROBOT_HOME_Z_BASE_DEFAULT     123.0f
+#define ROBOT_HOME_PITCH_DEG_DEFAULT   -60.0f
+
 #elif ROBOT_NODE_ID == 2
 // NODE 2
 #define SERVO0_MIN_US  700
@@ -153,11 +162,11 @@
 #define SERVO6_MIN_US  500
 #define SERVO6_MAX_US  2100
 
-#define SERVO0_OFF_DEG  90.0f
-#define SERVO1_OFF_DEG  175.0f
-#define SERVO2_OFF_DEG  175.0f
-#define SERVO3_OFF_DEG  149.0f
-#define SERVO4_OFF_DEG  70.0f
+#define SERVO0_OFF_DEG  95.0f
+#define SERVO1_OFF_DEG  162.0f
+#define SERVO2_OFF_DEG  162.0f
+#define SERVO3_OFF_DEG  139.0f
+#define SERVO4_OFF_DEG  80.0f
 #define SERVO5_OFF_DEG  77.0f
 #define SERVO6_OFF_DEG  100.0f
 
@@ -172,16 +181,30 @@
 #define J1_B_TRIM_DEG   -0.5f
 
 #define NODE_HOME_J0 95
-#define NODE_HOME_J1 60
-#define NODE_HOME_J2 60
-#define NODE_HOME_J3 65
-#define NODE_HOME_J4 154
+#define NODE_HOME_J1 47
+#define NODE_HOME_J2 47
+#define NODE_HOME_J3 55
+#define NODE_HOME_J4 164
 #define NODE_HOME_J5 75
 #define NODE_HOME_J6 90
+
+// #define ROBOT_HOME_X_BASE_DEFAULT     135.41f //stare
+// #define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
+// #define ROBOT_HOME_Z_BASE_DEFAULT     126.72f
+// #define ROBOT_HOME_PITCH_DEG_DEFAULT   -61.0f
+
+#define ROBOT_HOME_X_BASE_DEFAULT     115.0f
+#define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
+#define ROBOT_HOME_Z_BASE_DEFAULT     123.0f
+#define ROBOT_HOME_PITCH_DEG_DEFAULT   -60.0f
 
 #else
 #error "Calibration profile for this ROBOT_NODE_ID is not defined"
 #endif
+
+#define ROBOT_DEFAULT_PITCH_DEG ROBOT_HOME_PITCH_DEG_DEFAULT
+// IK phi corresponding to the calibrated HOME joint pose in the planar model.
+#define ROBOT_IK_HOME_PITCH_DEG_DEFAULT -53.0f
 
 #define SERVO_PWM_RANGES_INIT { \
     { SERVO0_MIN_US, SERVO0_MAX_US }, \
@@ -382,8 +405,8 @@
 
 #define HOME_PRE_Q_INIT { \
     NODE_HOME_J0, \
-    40.0f, \
-    (40.0f + J1_B_TRIM_DEG), \
+    (NODE_HOME_J1 - 20.0f), \
+    (NODE_HOME_J2 - 20.0f + J1_B_TRIM_DEG), \
     58.0f, \
     143.0f, \
     NODE_HOME_J5, \
@@ -397,14 +420,9 @@
 // ===============================
 // SENSOR_COUNT = 0 => sensorless mode
 
-#define ROBOT_HOME_X_BASE_DEFAULT     108.0f
-#define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
-#define ROBOT_HOME_Z_BASE_DEFAULT     116.0f
-#define ROBOT_HOME_PITCH_DEG_DEFAULT   -53.0f
-
 // Default WORK offset = HOME TCP in BASE.
-#define ROBOT_WORK_OFFSET_X_DEFAULT 0//ROBOT_HOME_X_BASE_DEFAULT
-#define ROBOT_WORK_OFFSET_Y_DEFAULT 0//ROBOT_HOME_Y_BASE_DEFAULT
-#define ROBOT_WORK_OFFSET_Z_DEFAULT 0//ROBOT_HOME_Z_BASE_DEFAULT
+#define ROBOT_WORK_OFFSET_X_DEFAULT 0 // ROBOT_HOME_X_BASE_DEFAULT
+#define ROBOT_WORK_OFFSET_Y_DEFAULT 0 // ROBOT_HOME_Y_BASE_DEFAULT
+#define ROBOT_WORK_OFFSET_Z_DEFAULT 0 // ROBOT_HOME_Z_BASE_DEFAULT
 
 #endif // CONFIG_H

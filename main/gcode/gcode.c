@@ -90,6 +90,146 @@ static bool parse_word(const char *p, char key, float *out)
     return true;
 }
 
+static FILE *gcode_open_file(const char *filename)
+{
+    char path1[256];
+    char path2[256];
+    FILE *fp = NULL;
+
+    if (!filename || filename[0] == '\0') {
+        ESP_LOGE(TAG, "Empty filename");
+        return NULL;
+    }
+
+    if (filename[0] == '/') {
+        snprintf(path1, sizeof(path1), "%s", filename);
+        fp = fopen(path1, "r");
+        if (!fp) {
+            ESP_LOGE(TAG, "Cannot open '%s' (errno=%d: %s)", path1, errno, strerror(errno));
+        }
+        return fp;
+    }
+
+    snprintf(path1, sizeof(path1), "%s/%s", FILE_STORAGE_PATH, filename);
+    fp = fopen(path1, "r");
+
+    if (!fp) {
+        snprintf(path2, sizeof(path2), "/spiffs/%s", filename);
+        fp = fopen(path2, "r");
+
+        if (!fp) {
+            ESP_LOGE(TAG, "Cannot open '%s' nor '%s' (errno=%d: %s)",
+                     path1, path2, errno, strerror(errno));
+        } else {
+            ESP_LOGW(TAG, "Opened via fallback path: %s", path2);
+        }
+    }
+
+    return fp;
+}
+
+static bool gcode_line_can_run_without_reference(const char *line_in, bool *has_gripper_cmd)
+{
+    char line[200];
+
+    if (!line_in || !has_gripper_cmd) return false;
+
+    strncpy(line, line_in, sizeof(line) - 1);
+    line[sizeof(line) - 1] = '\0';
+    strip_comment(line);
+    if (line[0] == '\0') return true;
+
+    for (char *c = line; *c != '\0'; ++c) {
+        *c = (char)toupper((unsigned char)*c);
+    }
+
+    float g = -1.0f, m = -1.0f, f = 0.0f, x = 0.0f, y = 0.0f, z = 0.0f;
+    float p = 0.0f, s = 0.0f;
+
+    const bool hasG = parse_word(line, 'G', &g);
+    const bool hasM = parse_word(line, 'M', &m);
+    const bool hasF = parse_word(line, 'F', &f);
+    const bool hasX = parse_word(line, 'X', &x);
+    const bool hasY = parse_word(line, 'Y', &y);
+    const bool hasZ = parse_word(line, 'Z', &z);
+    const bool hasP = parse_word(line, 'P', &p);
+    const bool hasS = parse_word(line, 'S', &s);
+
+    (void)f;
+    (void)x;
+    (void)y;
+    (void)z;
+
+    if (hasX || hasY || hasZ || (hasG && hasM)) {
+        return false;
+    }
+
+    if (hasF && !hasG && !hasM) {
+        return true;
+    }
+
+    if (hasM) {
+        const int mi = (int)lroundf(m);
+
+        if (mi == 2 || mi == 30) {
+            return true;
+        }
+        if (mi == 10 || mi == 11) {
+            *has_gripper_cmd = true;
+            return true;
+        }
+        if (mi == 280 && hasS) {
+            *has_gripper_cmd = true;
+            return true;
+        }
+        return false;
+    }
+
+    if (hasG) {
+        const int gi = (int)lroundf(g);
+
+        if (gi == 20 || gi == 21 || gi == 90 || gi == 91) {
+            return true;
+        }
+        if (gi == 4) {
+            const float dwell_ms = hasP ? p : (hasS ? s * 1000.0f : -1.0f);
+            return isfinite(dwell_ms) && dwell_ms >= 0.0f;
+        }
+        return false;
+    }
+
+    return false;
+}
+
+static bool gcode_stream_can_run_without_reference(FILE *fp)
+{
+    bool has_gripper_cmd = false;
+    char line[200];
+
+    if (!fp) return false;
+
+    rewind(fp);
+    while (fgets(line, sizeof(line), fp)) {
+        if (!gcode_line_can_run_without_reference(line, &has_gripper_cmd)) {
+            rewind(fp);
+            return false;
+        }
+    }
+    rewind(fp);
+
+    return has_gripper_cmd;
+}
+
+bool gcode_file_can_run_without_reference(const char *filename)
+{
+    FILE *fp = gcode_open_file(filename);
+    if (!fp) return false;
+
+    const bool ok = gcode_stream_can_run_without_reference(fp);
+    fclose(fp);
+    return ok;
+}
+
 static void gcode_set_feed_from_word(float f_word)
 {
     float v_mm_min = to_mm(f_word);
@@ -417,45 +557,24 @@ bool gcode_run_file(const char *filename)
     s_stop = false;
     s_error = false;
 
-    if (!robot_is_referenced()) {
-        return gcode_abort("Cannot run G-code: robot is not referenced");
-    }
-
-    if (!robot_has_tcp_estimate()) {
-        return gcode_abort("Cannot run G-code: current TCP pose is unknown");
-    }
-
     if (!filename || filename[0] == '\0') {
         return gcode_abort("Empty filename");
     }
 
-    char path1[256];
-    char path2[256];
-    FILE *fp = NULL;
+    FILE *fp = gcode_open_file(filename);
+    if (!fp) {
+        return false;
+    }
 
-    if (filename[0] == '/') {
-        snprintf(path1, sizeof(path1), "%s", filename);
-        fp = fopen(path1, "r");
-        if (!fp) {
-            ESP_LOGE(TAG, "Cannot open '%s' (errno=%d: %s)", path1, errno, strerror(errno));
-            return false;
-        }
-    } else {
-        snprintf(path1, sizeof(path1), "%s/%s", FILE_STORAGE_PATH, filename);
-        fp = fopen(path1, "r");
-
-        if (!fp) {
-            snprintf(path2, sizeof(path2), "/spiffs/%s", filename);
-            fp = fopen(path2, "r");
-
-            if (!fp) {
-                ESP_LOGE(TAG, "Cannot open '%s' nor '%s' (errno=%d: %s)",
-                         path1, path2, errno, strerror(errno));
-                return false;
-            } else {
-                ESP_LOGW(TAG, "Opened via fallback path: %s", path2);
+    if (!robot_is_referenced() || !robot_has_tcp_estimate()) {
+        if (!gcode_stream_can_run_without_reference(fp)) {
+            fclose(fp);
+            if (!robot_is_referenced()) {
+                return gcode_abort("Cannot run G-code: robot is not referenced");
             }
+            return gcode_abort("Cannot run G-code: current TCP pose is unknown");
         }
+        ESP_LOGW(TAG, "Running gripper-only G-code without reference/TCP estimate");
     }
 
     char line[200];

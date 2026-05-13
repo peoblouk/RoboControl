@@ -104,9 +104,15 @@ static inline float clamp_pitch_deg(float pitch_deg)
     return clampf(pitch_deg, -89.0f, 89.0f);
 }
 
+static inline float tcp_ik_phi_deg(float pitch_deg)
+{
+    if (!isfinite(pitch_deg)) pitch_deg = ROBOT_DEFAULT_PITCH_DEG;
+    return clamp_pitch_deg(pitch_deg - ROBOT_HOME_PITCH_DEG_DEFAULT + ROBOT_IK_HOME_PITCH_DEG_DEFAULT);
+}
+
 static inline float tcp_ik_pitch_rad(float pitch_deg, float sign)
 {
-    return DEG2RAD(sign * clamp_pitch_deg(pitch_deg));
+    return DEG2RAD(sign * tcp_ik_phi_deg(pitch_deg));
 }
 
 static inline int servo_master(int servo_id) {
