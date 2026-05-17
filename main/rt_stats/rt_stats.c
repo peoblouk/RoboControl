@@ -15,18 +15,24 @@ void rt_stats_reset(rt_stats_t *s)
     s->count = 0;
     s->min   = 0;
     s->max   = 0;
-    s->mean  = 0.0;
-    s->m2    = 0.0;
+    s->sum   = 0;
+    s->sum_sq = 0;
 }
 
 void rt_stats_add_sample(rt_stats_t *s, int64_t x)
 {
+    if (x < 0) {
+        return;
+    }
+
+    const uint64_t ux = (uint64_t)x;
+
     if (s->count == 0) {
         s->count = 1;
         s->min   = x;
         s->max   = x;
-        s->mean  = (double)x;
-        s->m2    = 0.0;
+        s->sum   = ux;
+        s->sum_sq = ux * ux;
         return;
     }
 
@@ -34,31 +40,24 @@ void rt_stats_add_sample(rt_stats_t *s, int64_t x)
     if (x < s->min) s->min = x;
     if (x > s->max) s->max = x;
 
-    double delta  = (double)x - s->mean;
-    s->mean      += delta / (double)s->count;
-    double delta2 = (double)x - s->mean;
-    s->m2        += delta * delta2;
+    s->sum += ux;
+    s->sum_sq += ux * ux;
+}
+
+double rt_stats_mean(const rt_stats_t *s)
+{
+    if (s->count == 0) return 0.0;
+    return (double)s->sum / (double)s->count;
 }
 
 double rt_stats_stddev(const rt_stats_t *s)
 {
     if (s->count < 2) return 0.0;
-    double var = s->m2 / (double)(s->count - 1);
+    const double n = (double)s->count;
+    const double sum = (double)s->sum;
+    const double sum_sq = (double)s->sum_sq;
+    double var = (sum_sq - ((sum * sum) / n)) / (n - 1.0);
     return (var > 0.0) ? sqrt(var) : 0.0;
-}
-
-void rt_stats_print(const char *tag, const rt_stats_t *s)
-{
-    double std = rt_stats_stddev(s);
-    printf(
-        "[%s] n=%lu, min=%lld us, max=%lld us, mean=%.1f us, stddev=%.1f us\n",
-        tag,
-        (unsigned long)s->count,
-        (long long)s->min,
-        (long long)s->max,
-        s->mean,
-        std
-    );
 }
 
 // ===============================
@@ -68,31 +67,6 @@ void rt_stats_print(const char *tag, const rt_stats_t *s)
 int64_t rt_now_us(void)
 {
     return esp_timer_get_time();
-}
-
-void rt_span_start(int64_t *t_start_us)
-{
-    *t_start_us = esp_timer_get_time();
-}
-
-// Returns time span since t_start_us
-int64_t rt_span_end(int64_t t_start_us)
-{
-    int64_t now = esp_timer_get_time();
-    return now - t_start_us;
-}
-
-// Mearks time since last call and adds to stats
-void rt_loop_mark(rt_stats_t *stats, int64_t *last_timestamp_us)
-{
-    int64_t now = esp_timer_get_time();
-
-    if (*last_timestamp_us != 0) {
-        int64_t dt = now - *last_timestamp_us;
-        rt_stats_add_sample(stats, dt);
-    }
-
-    *last_timestamp_us = now;
 }
 
 // ===============================
@@ -124,11 +98,6 @@ static rt_stats_t s_monitor_metrics[RT_MON_METRIC_COUNT];
 static uint32_t s_monitor_events[RT_MON_EVENT_COUNT];
 static portMUX_TYPE s_monitor_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_monitor_file_task = NULL;
-
-const char *rt_monitor_file_path(void)
-{
-    return RT_STATS_FILE_PATH;
-}
 
 void rt_monitor_reset(void)
 {
@@ -189,7 +158,7 @@ static void rt_monitor_write_metric(FILE *f, const char *name, const rt_stats_t 
             (unsigned long)s->count,
             (long long)s->min,
             (long long)s->max,
-            s->mean,
+            rt_stats_mean(s),
             rt_stats_stddev(s));
 }
 

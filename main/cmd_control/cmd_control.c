@@ -261,7 +261,7 @@ static int cmd_joint(int argc, char **argv)
         if (g_joint_limits[2].min_deg > lo) lo = g_joint_limits[2].min_deg;
         if (g_joint_limits[2].max_deg < hi) hi = g_joint_limits[2].max_deg;
     } else {
-        static const int joint_to_servo[JOINT_COUNT] = { 0, 1, 3, 4, 5, 6 };
+        static const int joint_to_servo[JOINT_COUNT] = { JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO, JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO };
         int s = joint_to_servo[id];
         lo = g_joint_limits[s].min_deg;
         hi = g_joint_limits[s].max_deg;

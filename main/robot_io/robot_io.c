@@ -20,7 +20,8 @@ static adc_oneshot_unit_handle_t s_adc2 = NULL;
 #define SERVO_DUTY_MAX ((1U << SERVO_DUTY_RES) - 1U)
 
 typedef struct {
-    char filename[64];
+    char filename[128];
+    bool prepare_for_sync;
 } gcode_task_params_t;
 
 static const int s_joint_master_servo[JOINT_COUNT] = {
@@ -74,15 +75,20 @@ static volatile bool s_operating = false;
 static volatile bool s_referenced = false;
 static volatile bool s_tcp_estimate_is_valid = false;
 static volatile bool s_sync_ready = false;
+static volatile bool s_sync_start_hold = false;
 static volatile bool s_gcode_running = false;
 static volatile bool s_program_stop_requested = false;
 static volatile robot_error_t s_last_error = ROBOT_ERROR_NONE;
+static gcode_task_params_t s_gcode_request = {0};
+static TaskHandle_t s_gcode_task_handle = NULL;
 static robot_pose_t s_tcp_est_base = {
     .x = ROBOT_HOME_X_BASE_DEFAULT,
     .y = ROBOT_HOME_Y_BASE_DEFAULT,
     .z = ROBOT_HOME_Z_BASE_DEFAULT,
     .pitch_deg = ROBOT_HOME_PITCH_DEG_DEFAULT,
 };
+
+static void gcode_executor_task(void *arg);
 static const float s_home_q_init[SERVO_COUNT] = HOME_Q_INIT;
 static const float s_home_pre_q_init[SERVO_COUNT] = HOME_PRE_Q_INIT;
 
@@ -184,6 +190,24 @@ bool robot_is_sync_ready(void)
     bool ready = s_sync_ready;
     portEXIT_CRITICAL(&s_state_mux);
     return ready;
+}
+
+static void robot_set_sync_start_hold(bool hold)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    s_sync_start_hold = hold;
+    if (!hold) {
+        s_sync_ready = false;
+    }
+    portEXIT_CRITICAL(&s_state_mux);
+}
+
+static bool robot_is_sync_start_hold(void)
+{
+    portENTER_CRITICAL(&s_state_mux);
+    bool hold = s_sync_start_hold;
+    portEXIT_CRITICAL(&s_state_mux);
+    return hold;
 }
 
 bool robot_is_program_running(void)
@@ -345,37 +369,6 @@ bool robot_get_tcp_estimate_work(robot_pose_t *pose)
 // ===============================
 // SERVO / SERVO MAPPING
 // ===============================
-bool servo_pwm_set_range_us(int servo_id, int min_us, int max_us)
-{
-    if (servo_id < 0 || servo_id >= SERVO_COUNT) return false;
-    if (min_us < 0 || max_us < 0) return false;
-    if (min_us >= max_us) return false;
-
-    const int period_us = (int)lroundf(1000000.0f / (float)SERVO_PWM_FREQ);
-    if (min_us > period_us || max_us > period_us) return false;
-
-    portENTER_CRITICAL(&s_pwm_mux);
-    s_servo_pwm[servo_id].min_us = (uint16_t)min_us;
-    s_servo_pwm[servo_id].max_us = (uint16_t)max_us;
-    portEXIT_CRITICAL(&s_pwm_mux);
-    return true;
-}
-
-void servo_pwm_get_range_us(int servo_id, int *min_us, int *max_us)
-{
-    if (min_us) *min_us = 0;
-    if (max_us) *max_us = 0;
-    if (servo_id < 0 || servo_id >= SERVO_COUNT) return;
-
-    portENTER_CRITICAL(&s_pwm_mux);
-    uint16_t mn = s_servo_pwm[servo_id].min_us;
-    uint16_t mx = s_servo_pwm[servo_id].max_us;
-    portEXIT_CRITICAL(&s_pwm_mux);
-
-    if (min_us) *min_us = (int)mn;
-    if (max_us) *max_us = (int)mx;
-}
-
 static inline uint32_t angle_to_duty(int servo_id, float angle_deg)
 {
     const float period_us = 1000000.0f / (float)SERVO_PWM_FREQ;
@@ -929,6 +922,13 @@ static inline void robot_stats_record_loop_work(int64_t start_us)
     rt_monitor_add_sample(RT_MON_CONTROL_LOOP_WORK_US, rt_now_us() - start_us);
 }
 
+static bool robot_has_pending_work(void)
+{
+    if (robot_is_operating()) return true;
+    if (s_robot_queue != NULL && uxQueueMessagesWaiting(s_robot_queue) > 0) return true;
+    return false;
+}
+
 static void robot_control_task(void *arg)
 {
     (void)arg;
@@ -971,7 +971,12 @@ static void robot_control_task(void *arg)
 
         disarmed_latched = false;
 
-        BaseType_t cmd_received = xQueueReceive(s_robot_queue, &cmd, pdMS_TO_TICKS(EXEC_DT_MS));
+        BaseType_t cmd_received = pdFALSE;
+        if (seg_full()) {
+            vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
+        } else {
+            cmd_received = xQueueReceive(s_robot_queue, &cmd, pdMS_TO_TICKS(EXEC_DT_MS));
+        }
         loop_work_start_us = rt_now_us();
 
         if (cmd_received == pdTRUE) {
@@ -980,20 +985,22 @@ static void robot_control_task(void *arg)
             }
 
             if (cmd.type == ROBOT_CMD_QUEUE_FLUSH) {
+                robot_set_sync_start_hold(false);
                 seg_flush();
                 s_operating = false;
                 robot_stats_record_loop_work(loop_work_start_us);
                 continue;
             }
 
-            if (seg_full()) {
+            if (cmd.type == ROBOT_CMD_SYNC_RELEASE) {
+                robot_set_sync_start_hold(false);
+            } else if (seg_full()) {
                 ESP_LOGW(TAG, "Planner full, dropping command");
                 rt_monitor_count_event(RT_MON_EVENT_PLANNER_SEG_FULL);
                 s_operating = s_current_segment.active || !seg_empty();
                 robot_stats_record_loop_work(loop_work_start_us);
                 continue;
-            }
-
+            } else {
             traj_seg_t seg = {0};
             planner_get_tail_q(seg.q0);
             seg.tcp_target_valid = false;
@@ -1100,6 +1107,19 @@ static void robot_control_task(void *arg)
             seg.active = false;
 
             seg_push(&seg);
+            }
+        }
+
+        if (robot_is_sync_start_hold()) {
+            const bool hold_has_motion = s_current_segment.active || !seg_empty();
+            const bool hold_has_queue = s_robot_queue != NULL && uxQueueMessagesWaiting(s_robot_queue) > 0;
+
+            s_operating = hold_has_motion || hold_has_queue;
+            if (hold_has_motion) {
+                robot_set_sync_ready(true);
+            }
+            robot_stats_record_loop_work(loop_work_start_us);
+            continue;
         }
 
         if (!s_current_segment.active) {
@@ -1188,6 +1208,7 @@ bool robot_is_operating(void)
 
 void robot_stop_all(void)
 {
+    robot_set_sync_start_hold(false);
     gcode_stop();
 }
 
@@ -1250,7 +1271,7 @@ static bool robot_queue_send(robot_cmd_t *cmd, TickType_t timeout)
 
     bool queued = (xQueueSend(s_robot_queue, cmd, timeout) == pdTRUE);
     rt_monitor_count_event(queued ? RT_MON_EVENT_QUEUE_SEND_OK : RT_MON_EVENT_QUEUE_SEND_FAIL);
-    if (queued) {
+    if (queued && !robot_is_sync_start_hold()) {
         robot_set_sync_ready(false);
     }
     return queued;
@@ -1267,8 +1288,22 @@ void robot_control_start(void)
         return;
     }
 
-    BaseType_t res = xTaskCreatePinnedToCore(robot_control_task, "robot_ctrl", 4096, NULL, 6, NULL, CORE_ROBOT);
+    BaseType_t res = xTaskCreatePinnedToCore(robot_control_task, "robot_ctrl", 4096, NULL, 7, NULL, CORE_ROBOT);
     if (res != pdPASS) ESP_LOGE(TAG, "Failed to create robot_control_task");
+
+    if (s_gcode_task_handle == NULL) {
+        res = xTaskCreatePinnedToCore(gcode_executor_task,
+                                      "gcode_exec",
+                                      4096,
+                                      NULL,
+                                      6,
+                                      &s_gcode_task_handle,
+                                      CORE_ROBOT);
+        if (res != pdPASS) {
+            s_gcode_task_handle = NULL;
+            ESP_LOGE(TAG, "Failed to create gcode_executor_task");
+        }
+    }
 }
 
 bool robot_cmd_move_joints(const float q_target[SERVO_COUNT])
@@ -1385,7 +1420,10 @@ void robot_cmd_queue_flush(void)
 
     robot_cmd_t cmd = {0};
     cmd.type = ROBOT_CMD_QUEUE_FLUSH;
-    (void)robot_queue_send(&cmd, 0);
+    cmd.enqueue_time_us = rt_now_us();
+
+    xQueueReset(s_robot_queue);
+    (void)xQueueSendToFront(s_robot_queue, &cmd, 0);
 }
 
 // ===============================
@@ -1393,70 +1431,119 @@ void robot_cmd_queue_flush(void)
 // ===============================
 static void gcode_executor_task(void *arg)
 {
-    gcode_task_params_t *params = (gcode_task_params_t *)arg;
+    (void)arg;
 
-    ESP_LOGI(TAG, "Starting G-Code task for file: %s", params->filename);
-    bool res = gcode_run_file(params->filename);
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    if (res) {
-        while (robot_is_operating()) {
-            vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
+        gcode_task_params_t req;
+        portENTER_CRITICAL(&s_state_mux);
+        req = s_gcode_request;
+        portEXIT_CRITICAL(&s_state_mux);
+
+        ESP_LOGI(TAG, "Starting G-Code %sfor file: %s",
+                 req.prepare_for_sync ? "prepare " : "",
+                 req.filename);
+
+        bool res = gcode_run_file(req.filename);
+
+        if (res) {
+            while (robot_has_pending_work()) {
+                vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
+            }
+            robot_clear_error();
+            ESP_LOGI(TAG, "G-Code finished successfully");
+        } else {
+            robot_set_error_internal(ROBOT_ERROR_GCODE);
+            ESP_LOGE(TAG, "G-Code failed");
         }
-        robot_clear_error();
-        ESP_LOGI(TAG, "G-Code finished successfully");
-    } else {
-        robot_set_error_internal(ROBOT_ERROR_GCODE);
-        ESP_LOGE(TAG, "G-Code failed");
-    }
 
-    free(params);
-    portENTER_CRITICAL(&s_state_mux);
-    s_gcode_running = false;
-    s_program_stop_requested = false;
-    portEXIT_CRITICAL(&s_state_mux);
-    vTaskDelete(NULL);
-}
-
-bool robot_core_run_gcode(const char *filename)
-{
-    if (!s_armed) return false;
-    if (!filename || filename[0] == '\0') return false;
-    if (robot_is_program_running()) return false;
-
-    gcode_task_params_t *params = malloc(sizeof(gcode_task_params_t));
-    if (!params) {
-        ESP_LOGE(TAG, "Failed to allocate memory for G-code task");
-        return false;
-    }
-
-    strncpy(params->filename, filename, sizeof(params->filename) - 1);
-    params->filename[sizeof(params->filename) - 1] = '\0';
-    robot_set_sync_ready(false);
-    robot_clear_error();
-    portENTER_CRITICAL(&s_state_mux);
-    s_gcode_running = true;
-    s_program_stop_requested = false;
-    portEXIT_CRITICAL(&s_state_mux);
-
-    BaseType_t res = xTaskCreatePinnedToCore(
-        gcode_executor_task,
-        "gcode_exec",
-        4096,
-        params,
-        4,
-        NULL,
-        CORE_ROBOT
-    );
-
-    if (res != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create G-code task");
+        gcode_set_prefill_mode(false);
+        robot_set_sync_start_hold(false);
         portENTER_CRITICAL(&s_state_mux);
         s_gcode_running = false;
         s_program_stop_requested = false;
         portEXIT_CRITICAL(&s_state_mux);
-        free(params);
-        return false;
+    }
+}
+
+static bool robot_start_gcode_request(const char *filename, bool prepare_for_sync)
+{
+    if (!s_armed) return false;
+    if (!filename || filename[0] == '\0') return false;
+    if (s_gcode_task_handle == NULL) return false;
+    if (robot_is_program_running()) return false;
+    if (prepare_for_sync && robot_is_operating()) return false;
+
+    if (s_robot_queue != NULL) {
+        if (uxQueueMessagesWaiting(s_robot_queue) > 0) {
+            ESP_LOGW(TAG, "gcode start: discarding %u pending commands from queue",
+                     (unsigned)uxQueueMessagesWaiting(s_robot_queue));
+        }
+        xQueueReset(s_robot_queue);
+    }
+
+    robot_set_sync_start_hold(prepare_for_sync);
+    robot_set_sync_ready(false);
+    robot_clear_error();
+    gcode_set_prefill_mode(prepare_for_sync);
+
+    portENTER_CRITICAL(&s_state_mux);
+    strncpy(s_gcode_request.filename, filename, sizeof(s_gcode_request.filename) - 1);
+    s_gcode_request.filename[sizeof(s_gcode_request.filename) - 1] = '\0';
+    s_gcode_request.prepare_for_sync = prepare_for_sync;
+    s_gcode_running = true;
+    s_program_stop_requested = false;
+    portEXIT_CRITICAL(&s_state_mux);
+
+    xTaskNotifyGive(s_gcode_task_handle);
+    return true;
+}
+
+bool robot_core_prepare_gcode(const char *filename, TickType_t timeout)
+{
+    if (!robot_start_gcode_request(filename, true)) return false;
+
+    const TickType_t start = xTaskGetTickCount();
+    const TickType_t wait = (timeout > 0) ? timeout : 1;
+
+    while ((xTaskGetTickCount() - start) < wait) {
+        if (robot_is_sync_ready()) {
+            return true;
+        }
+        if (!robot_is_program_running() || robot_get_last_error() != ROBOT_ERROR_NONE) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
+    }
+
+    gcode_stop();
+    robot_set_sync_start_hold(false);
+    if (robot_get_last_error() == ROBOT_ERROR_NONE) {
+        robot_set_error_internal(ROBOT_ERROR_SYNC);
+    }
+    return false;
+}
+
+bool robot_core_start_prepared_gcode(void)
+{
+    if (!robot_is_program_running()) return false;
+    if (!robot_is_sync_ready()) return false;
+    if (!robot_is_sync_start_hold()) return false;
+
+    robot_set_sync_start_hold(false);
+
+    if (s_robot_queue != NULL) {
+        robot_cmd_t cmd = {0};
+        cmd.type = ROBOT_CMD_SYNC_RELEASE;
+        cmd.enqueue_time_us = rt_now_us();
+        (void)xQueueSendToFront(s_robot_queue, &cmd, 0);
     }
 
     return true;
+}
+
+bool robot_core_run_gcode(const char *filename)
+{
+    return robot_start_gcode_request(filename, false);
 }

@@ -7,9 +7,6 @@
 static httpd_handle_t g_httpd = NULL;
 static const char *TAG = "wifi_server";
 
-#define WS_MAX_CLIENTS 4
-#define WS_SENSORS_PERIOD_MS 200
-
 static int g_ws_clients[WS_MAX_CLIENTS];
 static SemaphoreHandle_t g_ws_lock = NULL;
 static TaskHandle_t g_ws_task_handle = NULL;
@@ -106,13 +103,9 @@ static void ws_broadcast(const char *msg) {
     }
 }
 
-static inline const char *robot_state_str_(void) {
-    return robot_get_system_state_name();
-}
-
-static void ws_send_sensors_to_fd(int fd) {
+static cJSON *build_telemetry_json(void) {
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "state", robot_state_str_());
+    cJSON_AddStringToObject(root, "state", robot_get_system_state_name());
     cJSON_AddNumberToObject(root, "can_node_id", (double)CAN_NODE_ID);
     cJSON_AddBoolToObject(root, "armed", robot_is_armed());
     cJSON_AddBoolToObject(root, "referenced", robot_is_referenced());
@@ -134,16 +127,22 @@ static void ws_send_sensors_to_fd(int fd) {
         cJSON_AddNumberToObject(tcp, "pitch", pose.pitch_deg);
     }
 
+    static const int joint_to_servo[JOINT_COUNT] = {
+        JOINT0_SERVO, JOINT1_SERVO, JOINT2_SERVO,
+        JOINT3_SERVO, JOINT4_SERVO, JOINT5_SERVO
+    };
     cJSON *arr = cJSON_AddArrayToObject(root, "sensors");
-    static const int joint_to_servo[6] = {0, 1, 3, 4, 5, 6};
-
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < JOINT_COUNT; i++) {
         cJSON *o = cJSON_CreateObject();
         cJSON_AddNumberToObject(o, "id", i);
         cJSON_AddNumberToObject(o, "angle", robot_get_est_angle(joint_to_servo[i]));
         cJSON_AddItemToArray(arr, o);
     }
+    return root;
+}
 
+static void ws_send_sensors_to_fd(int fd) {
+    cJSON *root = build_telemetry_json();
     char *out = cJSON_PrintUnformatted(root);
     ws_send_to(fd, out);
     free(out);
@@ -299,7 +298,7 @@ static esp_err_t ws_handler(httpd_req_t *req) {
             char resp[128];
             snprintf(resp, sizeof(resp),
                      "{\"status\":\"ok\",\"cmd\":\"gcode_stop\",\"state\":\"%s\"}",
-                     robot_state_str_());
+                     robot_get_system_state_name());
             ws_send_to(fd, resp);
         }
 
@@ -313,43 +312,11 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 static void ws_task_sensors(void *arg) {
     (void)arg;
     for (;;) {
-        cJSON *root = cJSON_CreateObject();
-        cJSON_AddStringToObject(root, "state", robot_state_str_());
-        cJSON_AddNumberToObject(root, "can_node_id", (double)CAN_NODE_ID);
-        cJSON_AddBoolToObject(root, "armed", robot_is_armed());
-        cJSON_AddBoolToObject(root, "referenced", robot_is_referenced());
-        cJSON_AddBoolToObject(root, "tcp_est_valid", robot_has_tcp_estimate());
-
-        float wx, wy, wz;
-        robot_get_work_offset(&wx, &wy, &wz);
-        cJSON *wo = cJSON_AddObjectToObject(root, "work_offset");
-        cJSON_AddNumberToObject(wo, "x", wx);
-        cJSON_AddNumberToObject(wo, "y", wy);
-        cJSON_AddNumberToObject(wo, "z", wz);
-
-        robot_pose_t pose;
-        if (robot_get_tcp_estimate_work(&pose)) {
-            cJSON *tcp = cJSON_AddObjectToObject(root, "tcp_work");
-            cJSON_AddNumberToObject(tcp, "x", pose.x);
-            cJSON_AddNumberToObject(tcp, "y", pose.y);
-            cJSON_AddNumberToObject(tcp, "z", pose.z);
-            cJSON_AddNumberToObject(tcp, "pitch", pose.pitch_deg);
-        }
-
-        cJSON *arr = cJSON_AddArrayToObject(root, "sensors");
-        static const int joint_to_servo[6] = {0, 1, 3, 4, 5, 6};
-
-        for (int i = 0; i < 6; i++) {
-            cJSON *o = cJSON_CreateObject();
-            cJSON_AddNumberToObject(o, "id", i);
-            cJSON_AddNumberToObject(o, "angle", robot_get_est_angle(joint_to_servo[i]));
-            cJSON_AddItemToArray(arr, o);
-        }
+        cJSON *root = build_telemetry_json();
         char *out = cJSON_PrintUnformatted(root);
         ws_broadcast(out);
         free(out);
         cJSON_Delete(root);
-
         vTaskDelay(pdMS_TO_TICKS(WS_SENSORS_PERIOD_MS));
     }
 }
@@ -387,7 +354,7 @@ void ws_handlers_start_task(void) {
         NULL,
         5,
         &g_ws_task_handle,
-        CORE_ROBOT);
+        CORE_COMM);
     if (ok != pdPASS) {
         g_ws_task_handle = NULL;
         ESP_LOGE(TAG, "Failed to start ws_sensors task");

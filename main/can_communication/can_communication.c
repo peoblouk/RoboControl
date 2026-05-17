@@ -5,8 +5,8 @@
 #include "can_communication.h"
 
 #include <errno.h>
-//#include <limits.h>
 #include <sys/stat.h>
+#include "driver/gpio.h"
 
 static const char *TAG = "can";
 
@@ -238,7 +238,6 @@ static void can_set_prepared_slot(uint8_t slot)
     portENTER_CRITICAL(&s_proto_mux);
     s_prepared_slot = (int)slot;
     portEXIT_CRITICAL(&s_proto_mux);
-    robot_set_sync_ready(true);
 }
 
 static void can_set_active_slot(int slot)
@@ -536,6 +535,24 @@ static bool can_start_program_slot(uint8_t slot)
     return true;
 }
 
+static can_protocol_result_t can_prepare_program_slot(uint8_t slot)
+{
+    char path[CAN_SLOT_PATH_MAX] = {0};
+
+    if (!can_slot_valid(slot)) return CAN_PROTO_ERR_INVALID_SLOT;
+    if (!robot_is_armed() || !robot_is_referenced() || !robot_has_tcp_estimate()) return CAN_PROTO_ERR_NOT_READY;
+
+    can_make_slot_path(slot, false, path, sizeof(path));
+    if (!can_file_exists(path)) return CAN_PROTO_ERR_FILE;
+
+    if (!robot_core_prepare_gcode(path, pdMS_TO_TICKS(GCODE_PREPARE_TIMEOUT_MS))) {
+        return CAN_PROTO_ERR_EXEC;
+    }
+
+    can_set_prepared_slot(slot);
+    return CAN_PROTO_OK;
+}
+
 static void can_reply_protocol_error(uint8_t cmd,
                                      can_protocol_result_t result,
                                      uint8_t detail0,
@@ -579,6 +596,9 @@ static void can_process_command_frame(const twai_message_t *msg)
             can_set_active_slot(-1);
             can_upload_reset(true);
             robot_disarm();
+#ifdef SYNC_MEASURE_GPIO
+            gpio_set_level(SYNC_MEASURE_GPIO, 0);  // reset for next measurement
+#endif
             (void)can_send_response(cmd, CAN_PROTO_OK, 0, 0, 0, 0);
             (void)can_send_status_frame_internal();
             return;
@@ -742,8 +762,6 @@ static void can_process_command_frame(const twai_message_t *msg)
             }
 
             const uint8_t slot = msg->data[1];
-            char path[CAN_SLOT_PATH_MAX] = {0};
-
             if (!can_slot_valid(slot)) {
                 can_reply_protocol_error(cmd, CAN_PROTO_ERR_INVALID_SLOT, slot, 0);
                 return;
@@ -757,13 +775,12 @@ static void can_process_command_frame(const twai_message_t *msg)
                 return;
             }
 
-            can_make_slot_path(slot, false, path, sizeof(path));
-            if (!can_file_exists(path)) {
-                can_reply_protocol_error(cmd, CAN_PROTO_ERR_FILE, slot, 0);
+            can_protocol_result_t prepare_result = can_prepare_program_slot(slot);
+            if (prepare_result != CAN_PROTO_OK) {
+                can_reply_protocol_error(cmd, prepare_result, slot, 0);
                 return;
             }
 
-            can_set_prepared_slot(slot);
             (void)can_send_response(cmd, CAN_PROTO_OK, slot, 0, 0, 0);
             (void)can_send_status_frame_internal();
             return;
@@ -775,11 +792,16 @@ static void can_process_command_frame(const twai_message_t *msg)
                 can_reply_protocol_error(cmd, CAN_PROTO_ERR_NOT_READY, 0, 0);
                 return;
             }
-            if (!can_start_program_slot((uint8_t)prepared_slot)) {
+            if (!robot_core_start_prepared_gcode()) {
                 can_reply_protocol_error(cmd, CAN_PROTO_ERR_EXEC, (uint8_t)prepared_slot, 0);
                 return;
             }
 
+#ifdef SYNC_MEASURE_GPIO
+            gpio_set_level(SYNC_MEASURE_GPIO, 1);  // rising edge = program start
+#endif
+            can_set_active_slot(prepared_slot);
+            can_clear_prepared_slot();
             (void)can_send_response(cmd, CAN_PROTO_OK, (uint8_t)prepared_slot, 0, 0, 0);
             (void)can_send_status_frame_internal();
             return;
@@ -923,6 +945,22 @@ static void can_status_task(void *arg)
     }
 }
 
+#ifdef SYNC_MEASURE_GPIO
+static void sync_measure_gpio_init(void)
+{
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << SYNC_MEASURE_GPIO),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(SYNC_MEASURE_GPIO, 0);
+    ESP_LOGI(TAG, "sync measure GPIO %d initialised (LOW)", (int)SYNC_MEASURE_GPIO);
+}
+#endif
+
 void can_init(void)
 {
     if (s_can_started) {
@@ -995,6 +1033,10 @@ void can_start(void)
     }
 
     s_can_tasks_started = true;
+
+#ifdef SYNC_MEASURE_GPIO
+    sync_measure_gpio_init();
+#endif
 }
 
 bool can_is_started(void)

@@ -21,6 +21,15 @@
 #endif
 
 // ===============================
+// SYNC MEASUREMENT GPIO
+// ===============================
+// Set HIGH when SYNC_START is accepted and program begins executing.
+// Set LOW when DISARM is received (resets for the next run).
+// Connect to an oscilloscope probe; measure the rising-edge delta between nodes.
+// Undefine to disable.
+#define SYNC_MEASURE_GPIO   GPIO_NUM_3
+
+// ===============================
 // CAN / TWAI CONFIGURATION
 // ===============================
 #define CAN_TX_GPIO             GPIO_NUM_14
@@ -129,11 +138,6 @@
 #define NODE_HOME_J5 96
 #define NODE_HOME_J6 90
 
-// #define ROBOT_HOME_X_BASE_DEFAULT     104.89f //stare
-// #define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
-// #define ROBOT_HOME_Z_BASE_DEFAULT     119.00f
-// #define ROBOT_HOME_PITCH_DEG_DEFAULT   -65.0f
-
 #define ROBOT_HOME_X_BASE_DEFAULT     115.0f
 #define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
 #define ROBOT_HOME_Z_BASE_DEFAULT     123.0f
@@ -188,11 +192,6 @@
 #define NODE_HOME_J5 75
 #define NODE_HOME_J6 90
 
-// #define ROBOT_HOME_X_BASE_DEFAULT     135.41f //stare
-// #define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
-// #define ROBOT_HOME_Z_BASE_DEFAULT     126.72f
-// #define ROBOT_HOME_PITCH_DEG_DEFAULT   -61.0f
-
 #define ROBOT_HOME_X_BASE_DEFAULT     115.0f
 #define ROBOT_HOME_Y_BASE_DEFAULT       0.0f
 #define ROBOT_HOME_Z_BASE_DEFAULT     123.0f
@@ -231,16 +230,13 @@
     SERVO3_DIR, SERVO4_DIR, SERVO5_DIR, SERVO6_DIR \
 }
 
-// #define SERVO_OFF_INIT { 75.0f, 175.0f, 175.0f, 149.0f, 90.0f, 90.0f, 90.0f }
-// #define SERVO_DIR_INIT {  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f }
-//correct for "L" pose with current calibration | move 92.5 0 183.0 |
-
 // ===============================
 // ROBOT: EXECUTOR / TIMING
 // ===============================
-#define EXEC_DT_MS    20
+#define EXEC_DT_MS    5
 #define EXEC_DT_S     (EXEC_DT_MS / 1000.0f)
 #define MIN_SEG_T     0.05f
+#define GCODE_PREPARE_TIMEOUT_MS 3000
 
 // ===============================
 // ROBOT: PLANNER / BUFFERS
@@ -256,8 +252,8 @@
 #define L1 115.9f               // J1 -> J2
 #define L2 79.4f                // J2 -> J3
 #define L3 58.8f                // J3 -> J4
-#define L4_OPEN   70.0f         // J4 -> gripper closed (90 degree)
-#define L4_CLOSED 54.6f         // J4 -> gripper open (0 degree)
+#define L4_OPEN   70.0f         // J4 -> TCP offset when gripper open  (servo 90°)
+#define L4_CLOSED 54.6f         // J4 -> TCP offset when gripper closed (servo 0°)
 
 // Tool length [mm]
 #define L_TOOL_OPEN   (L3 + L4_OPEN)    // 128.8 mm
@@ -362,6 +358,7 @@
 // ===============================
 #define RC_STR_HELPER(x) #x
 #define RC_STR(x) RC_STR_HELPER(x)
+#define WS_SENSORS_PERIOD_MS   200
 #define WIFI_SSID      "RoboControl_" RC_STR(ROBOT_NODE_ID)
 #define WIFI_PASS      "Robo-Control123"
 #define MAX_STA_CONN   4

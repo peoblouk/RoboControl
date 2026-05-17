@@ -12,6 +12,7 @@ static const char *TAG = "gcode";
 
 static volatile bool s_stop = false;
 static volatile bool s_error = false;
+static volatile bool s_prefill_mode = false;
 static gcode_state_t st;
 
 static float to_mm(float v) { return st.units_mm ? v : (v * 25.4f); }
@@ -71,6 +72,11 @@ void gcode_fail_external(const char *msg)
     }
     s_error = true;
     s_stop = true;
+}
+
+void gcode_set_prefill_mode(bool enabled)
+{
+    s_prefill_mode = enabled;
 }
 
 static void strip_comment(char *s)
@@ -270,6 +276,10 @@ static bool send_xyz_blocking(float x, float y, float z, float pitch_deg, float 
 
     while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
         if (robot_cmd_move_xyz_work_t(x, y, z, pitch_deg, duration_s, 0)) {
+            if (s_prefill_mode) {
+                return true;
+            }
+
             const TickType_t settle = pdMS_TO_TICKS(60);
             const TickType_t t_cmd = xTaskGetTickCount();
 
@@ -278,11 +288,11 @@ static bool send_xyz_blocking(float x, float y, float z, float pitch_deg, float 
                 if (!robot_is_operating()) {
                     return true;
                 }
-                vTaskDelay(pdMS_TO_TICKS(20));
+                vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
             }
             return false;
         }
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
     }
 
     return false;
@@ -294,6 +304,10 @@ static bool send_dwell_blocking(uint32_t dwell_ms, TickType_t timeout)
 
     while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
         if (robot_cmd_dwell_ms(dwell_ms, 0)) {
+            if (s_prefill_mode) {
+                return true;
+            }
+
             const TickType_t settle = pdMS_TO_TICKS(20);
             const TickType_t t_cmd = xTaskGetTickCount();
 
@@ -302,11 +316,11 @@ static bool send_dwell_blocking(uint32_t dwell_ms, TickType_t timeout)
                 if (!robot_is_operating()) {
                     return true;
                 }
-                vTaskDelay(pdMS_TO_TICKS(20));
+                vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
             }
             return false;
         }
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
     }
 
     return false;
@@ -318,6 +332,10 @@ static bool send_gripper_blocking(float gripper_deg, TickType_t timeout)
 
     while (!s_stop && (xTaskGetTickCount() - t0) < timeout) {
         if (robot_cmd_gripper_set(gripper_deg, 0)) {
+            if (s_prefill_mode) {
+                return true;
+            }
+
             const TickType_t settle = pdMS_TO_TICKS(20);
             const TickType_t t_cmd = xTaskGetTickCount();
 
@@ -326,11 +344,11 @@ static bool send_gripper_blocking(float gripper_deg, TickType_t timeout)
                 if (!robot_is_operating()) {
                     return true;
                 }
-                vTaskDelay(pdMS_TO_TICKS(20));
+                vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
             }
             return false;
         }
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(EXEC_DT_MS));
     }
 
     return false;
@@ -554,8 +572,6 @@ bool gcode_push_line(const char *line_in)
 bool gcode_run_file(const char *filename)
 {
     gcode_reset();
-    s_stop = false;
-    s_error = false;
 
     if (!filename || filename[0] == '\0') {
         return gcode_abort("Empty filename");

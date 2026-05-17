@@ -84,6 +84,8 @@ bool gcode_execute_cmd(const gcode_cmd_t *cmd);
 bool gcode_push_line(const char *line);
 /** @brief Execute a G-code file line-by-line until completion or stop/error. */
 bool gcode_run_file(const char *filename);
+/** @brief Enable queue-ahead execution for synchronized PREPARE. */
+void gcode_set_prefill_mode(bool enabled);
 /** @brief Request graceful stop of current G-code execution. */
 void gcode_stop(void);
 /** @brief Force external failure state and stop execution. */

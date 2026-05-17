@@ -151,7 +151,8 @@ typedef enum {
     ROBOT_CMD_MOVE_JOINTS_T, ///< Joint-space move with explicit duration.
     ROBOT_CMD_DWELL,         ///< Timed pause.
     ROBOT_CMD_GRIPPER,       ///< Gripper setpoint command.
-    ROBOT_CMD_QUEUE_FLUSH    ///< Flush command queue.
+    ROBOT_CMD_QUEUE_FLUSH,   ///< Flush command queue.
+    ROBOT_CMD_SYNC_RELEASE   ///< Release synchronized-start hold.
 } robot_cmd_type_t;
 
 /** @brief One robot command queue item. */
@@ -253,6 +254,10 @@ bool robot_cmd_home_reference(void);
 void robot_cmd_queue_flush(void);
 /** @brief Start asynchronous G-code run from file. */
 bool robot_core_run_gcode(const char *filename);
+/** @brief Prepare G-code for synchronized start and wait until first motion is buffered. */
+bool robot_core_prepare_gcode(const char *filename, TickType_t timeout);
+/** @brief Release a program prepared by robot_core_prepare_gcode(). */
+bool robot_core_start_prepared_gcode(void);
 /** @brief Stop current execution and clear pending motion. */
 void robot_stop_all(void);
 
