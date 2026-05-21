@@ -21,15 +21,6 @@
 #endif
 
 // ===============================
-// SYNC MEASUREMENT GPIO
-// ===============================
-// Set HIGH when SYNC_START is accepted and program begins executing.
-// Set LOW when DISARM is received (resets for the next run).
-// Connect to an oscilloscope probe; measure the rising-edge delta between nodes.
-// Undefine to disable.
-#define SYNC_MEASURE_GPIO   GPIO_NUM_3
-
-// ===============================
 // CAN / TWAI CONFIGURATION
 // ===============================
 #define CAN_TX_GPIO             GPIO_NUM_14
